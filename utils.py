@@ -76,6 +76,7 @@ def stream_process_output(process, queue):
 
 def show_terminal_output(process, timeout=60):
     """터미널 출력을 실시간으로 표시하는 함수"""
+    st.markdown('<style>div[data-testid="stCodeBlock"] > div { width: 100% !important; }</style>', unsafe_allow_html=True)
     log_container = st.empty()
     progress_container = st.empty()
     log_text = []
@@ -162,23 +163,34 @@ def stop_ollama_model():
     try:
         st.write("🛑 모델 프로세스를 종료하는 중...")
         
+        # 실행 중인 ollama 프로세스 찾기
         process = Popen(
-            f"pkill ollama 2>&1 | tee -a {LOG_FILE}",
+            "ps aux | grep 'ollama run' | grep -v grep | awk '{print $2}'",
             shell=True,
             stdout=PIPE,
             stderr=PIPE,
-            bufsize=1,
-            universal_newlines=True
+            text=True
         )
+        pid = process.stdout.read().strip()
         
-        log_text = show_terminal_output(process, timeout=10)
-        
-        if process.returncode == 0:
-            return True, "모델이 성공적으로 중지되었습니다."
+        if pid:
+            # 프로세스 종료
+            kill_process = Popen(
+                f"kill {pid}",
+                shell=True,
+                stdout=PIPE,
+                stderr=PIPE,
+                text=True
+            )
+            kill_process.wait()
+            
+            if kill_process.returncode == 0:
+                return True, "모델이 성공적으로 중지되었습니다."
+            else:
+                return False, "모델 프로세스 종료 중 오류가 발생했습니다."
         else:
-            if "no process found" in ''.join(log_text):
-                return True, "실행 중인 모델이 없습니다."
-            return False, "모델 중지 중 오류 발생"
+            return True, "실행 중인 모델이 없습니다."
+            
     except Exception as e:
         return False, f"예상치 못한 오류가 발생했습니다: {str(e)}"
 
@@ -230,25 +242,89 @@ def get_available_models():
     except:
         return []
 
+def get_model_parameters(model_name):
+    """모델의 파라미터 수를 반환"""
+    model_params = {
+        'llama2': ['7B', '13B', '70B'],
+        'llama2-uncensored': ['7B', '13B'],
+        'mistral': ['7B'],
+        'mixtral': ['8x7B'],
+        'gemma': ['2B', '7B'],
+        'qwen': ['7B', '14B', '72B'],
+        'yi': ['6B', '34B'],
+        'openchat': ['7B'],
+        'neural': ['7B'],
+        'falcon': ['7B', '40B'],
+        'dolphin': ['7B'],
+        'vicuna': ['7B', '13B'],
+        'zephyr': ['7B'],
+        'nous-hermes': ['7B', '13B'],
+        'orca': ['3B', '13B'],
+        'starling': ['7B'],
+        'openhermes': ['7B', '13B'],
+        'wizard': ['7B', '13B'],
+        'stable-beluga': ['7B', '13B'],
+        'samantha': ['7B'],
+        'phind': ['34B'],
+        'deepseek': ['7B', '67B'],
+        'solar': ['7B', '10.7B'],
+        'meditron': ['7B'],
+        'xwin': ['7B', '13B', '70B'],
+        'tinyllama': ['1.1B'],
+        'phi': ['2.7B'],
+        'notus': ['7B'],
+        'codellama': ['7B', '13B', '34B'],
+        'wizardcoder': ['13B', '15B', '34B']
+    }
+    
+    # 모델 이름에서 버전 정보 제거
+    base_model = model_name.split(':')[0]
+    
+    # 기본 모델 이름으로 검색
+    for key in model_params:
+        if key in base_model.lower():
+            return model_params[key]
+    
+    return []
+
 def fetch_ollama_models():
-    """Ollama 허브에서 사용 가능한 모델 목록 가져오기"""
+    """Ollama 허브에서 사용 가능한 LLM 모델 목록 가져오기"""
     try:
-        st.write("🔍 Ollama 모델 목록을 가져오는 중...")
+        st.write("🔍 Ollama LLM 모델 목록을 가져오는 중...")
         
-        process = Popen(
-            f"curl -s https://ollama.com/library 2>&1 | tee -a {LOG_FILE}",
-            shell=True,
-            stdout=PIPE,
-            stderr=PIPE,
-            bufsize=1,
-            universal_newlines=True
-        )
+        response = requests.get("https://ollama.com/library", timeout=10)
+        response.raise_for_status()
         
-        log_text = show_terminal_output(process, timeout=10)
+        # HTML 응답에서 모델 이름 추출
+        models = re.findall(r'"/library/([^"]+)"', response.text)
         
-        content = '\n'.join(log_text)
-        models = re.findall(r'"/library/([^"]+)"', content)
-        return sorted(set(models))
+        # LLM이 아닌 모델들 필터링
+        excluded_keywords = [
+            'coder', 'code', 'instruct', 'solar', 'phi', 
+            'neural-chat', 'wizard-math', 'dolphin', 
+            'stablelm', 'starcoder', 'wizardcoder'
+        ]
+        
+        # LLM 모델만 필터링하고 파라미터 정보 추가
+        llm_models = []
+        for model in models:
+            # 제외할 키워드가 모델 이름에 포함되어 있는지 확인
+            if not any(keyword in model.lower() for keyword in excluded_keywords):
+                params = get_model_parameters(model)
+                # 파라미터 정보가 있는 모델만 추가
+                if params:
+                    base_name = model.split(':')[0]
+                    # 각 파라미터 버전별로 별도의 항목 추가
+                    for param in params:
+                        param_code = param.lower().replace('x', '')  # 8x7B -> 7b
+                        model_code = f"{base_name}:{param_code}"
+                        llm_models.append({
+                            'name': base_name,
+                            'code': model_code,
+                            'parameters': param
+                        })
+        
+        return sorted(llm_models, key=lambda x: (x['name'], x['parameters']))
         
     except Exception as e:
         st.error(f"모델 목록 가져오기 실패: {str(e)}")
