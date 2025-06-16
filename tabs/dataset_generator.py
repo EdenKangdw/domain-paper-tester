@@ -7,6 +7,10 @@ import requests
 import random
 from typing import List, Tuple
 import re
+from datetime import datetime
+import time
+import psutil
+import subprocess
 
 # Model tokenizer settings
 MODEL_TOKENIZER_MAP = {
@@ -526,6 +530,44 @@ def load_tokenizer(model_key):
         st.error(f"Error loading tokenizer: {str(e)}")
         return None
 
+def generate_domain_prompt(domain: str, model_key: str) -> str:
+    """도메인별로 새로운 프롬프트를 생성합니다."""
+    prompt = f"""Generate a new question or prompt related to the {domain} domain.
+The prompt should be:
+1. Specific to the {domain} domain
+2. Clear and concise
+3. Focused on extracting key information
+4. Natural and professional
+
+Please provide only the prompt without any additional text or explanation."""
+
+    try:
+        response = get_model_response(model_key, prompt)
+        # 응답에서 첫 번째 문장만 추출
+        prompt = response.split('\n')[0].strip()
+        return prompt
+    except Exception as e:
+        print(f"Error generating prompt: {str(e)}")
+        return f"Please enter your {domain} domain prompt here..."
+
+def get_cpu_temperature():
+    """CPU 온도를 가져옵니다."""
+    try:
+        # WSL2에서 CPU 온도 확인
+        temp = subprocess.check_output(['sensors']).decode()
+        # 온도 값 추출 (예: "Core 0:        +80.0°C")
+        temp = float(re.search(r'\+(\d+\.\d+)°C', temp).group(1))
+        return temp
+    except:
+        return None
+
+def check_temperature():
+    """CPU 온도를 확인하고 안전 여부를 판단합니다."""
+    temp = get_cpu_temperature()
+    if temp is not None and temp > 75:  # 75도 이상이면 위험
+        return False, temp
+    return True, temp
+
 def show():
     st.title("Dataset Generator")
     
@@ -548,246 +590,176 @@ def show():
     
     # Domain selection
     st.subheader("🎯 Domain")
-    domain = st.selectbox(
-        "Select domain",
-        ["Medical", "Legal", "Technical", "General"],
-        key="domain_selector"
+    domains = ["Medical", "Legal", "Technical", "General"]
+    
+    # Dataset generation settings
+    st.subheader("📊 Dataset Generation")
+    generation_mode = st.radio(
+        "Generation Mode",
+        ["Single Domain", "All Domains"],
+        help="단일 도메인 또는 모든 도메인에 대해 데이터셋을 생성합니다."
     )
     
-    # Prompt input
+    if generation_mode == "Single Domain":
+        selected_domain = st.selectbox(
+            "Select domain",
+            domains,
+            key="domain_selector"
+        )
+        selected_domains = [selected_domain]
+    else:
+        selected_domain = domains[0]  # 기본값으로 첫 번째 도메인 선택
+        selected_domains = domains
+    
+    num_datasets = st.number_input(
+        "Number of datasets per domain",
+        min_value=1,
+        max_value=100000,
+        value=5,
+        step=1,
+        help="각 도메인별로 생성할 데이터셋의 개수"
+    )
+    
+    # Safety settings
+    st.subheader("⚠️ Safety Settings")
+    cooldown_interval = st.number_input(
+        "Cooldown interval (seconds)",
+        min_value=1,
+        max_value=60,
+        value=5,
+        step=1,
+        help="데이터셋 생성 간 휴식 시간 (초)"
+    )
+    
+    # Generate dataset button
+    if st.button("🔄 Generate Dataset", key="generate_dataset"):
+        if not tokenizer:
+            st.warning(f"⚠️ Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
+            return
+        
+        # Double check if selected model is running
+        if not check_ollama_model_status(model_key):
+            st.error(f"❌ Model {model_key} is not running. Please start it in the Model Load tab.")
+            return
+        
+        try:
+            total_domains = len(selected_domains)
+            for domain_idx, domain in enumerate(selected_domains, 1):
+                with st.spinner(f"Generating {num_datasets} datasets for {domain} domain ({domain_idx}/{total_domains})..."):
+                    # Create output directory
+                    output_dir = Path(f"dataset/{domain.lower()}")
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Create output file
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    output_path = output_dir / f"{model_key}_{num_datasets}prompts_{timestamp}.jsonl"
+                    
+                    # Generate datasets
+                    with open(output_path, "w", encoding="utf-8") as f:
+                        for i in range(num_datasets):
+                            # Check CPU temperature
+                            is_safe, temp = check_temperature()
+                            if not is_safe:
+                                st.error(f"⚠️ CPU temperature too high ({temp}°C). Please wait for the system to cool down.")
+                                time.sleep(cooldown_interval * 2)  # 긴 휴식 시간
+                                continue
+                            
+                            # Generate new prompt for the domain
+                            prompt = generate_domain_prompt(domain, model_key)
+                            
+                            # Get model response
+                            response = get_model_response(model_key, prompt)
+                            
+                            # Tokenize and extract evidence
+                            tokens = tokenizer.tokenize(prompt)
+                            query = f"""Given the following text and prompt, extract evidence tokens that support the answer to the prompt.
+Text: {prompt}
+Prompt: {prompt}
+
+Please provide the evidence in the following JSON format:
+{{
+    "evidence_token_index": [list of token indices],
+    "evidence": [list of evidence tokens]
+}}
+
+Rules:
+1. Only include tokens that directly support the answer
+2. Maintain the original order of tokens
+3. Include complete phrases or sentences
+4. Do not include words unrelated to the domain"""
+
+                            evidence_response = get_model_response(model_key, query)
+                            
+                            try:
+                                # Extract JSON part from response
+                                json_match = re.search(r'(\{.*\})', evidence_response, re.DOTALL)
+                                if json_match:
+                                    evidence_data = json.loads(json_match.group(1))
+                                    evidence_indices = evidence_data.get("evidence_token_index", [])
+                                    evidence_tokens = evidence_data.get("evidence", [])
+                                    
+                                    # Create output data
+                                    output = {
+                                        "prompt": prompt,
+                                        "response": response,
+                                        "evidence_indices": evidence_indices,
+                                        "evidence_tokens": evidence_tokens,
+                                        "model": model_key,
+                                        "domain": domain,
+                                        "timestamp": timestamp,
+                                        "index": i + 1
+                                    }
+                                    
+                                    # Write to file
+                                    f.write(json.dumps(output, ensure_ascii=False) + "\n")
+                                    
+                                    # Show progress
+                                    st.text(f"Domain: {domain} ({domain_idx}/{total_domains})")
+                                    st.text(f"Generated dataset {i+1}/{num_datasets}")
+                                    st.text(f"Prompt: {prompt}")
+                                    if temp is not None:
+                                        st.text(f"CPU Temperature: {temp}°C")
+                                else:
+                                    st.warning(f"Could not find JSON in response for dataset {i+1}")
+                            except json.JSONDecodeError as e:
+                                st.warning(f"Error parsing evidence response for dataset {i+1}: {str(e)}")
+                                continue
+                            
+                            # Add cooldown period between generations
+                            time.sleep(cooldown_interval)
+                    
+                    st.success(f"✅ Generated {num_datasets} datasets for {domain} domain")
+                    st.success(f"Dataset saved to {output_path}")
+                
+                # Add a small delay between domains
+                if domain_idx < total_domains:
+                    time.sleep(cooldown_interval * 2)  # 도메인 간 더 긴 휴식 시간
+            
+            st.success(f"🎉 Completed generating datasets for all {total_domains} domains!")
+                
+        except Exception as e:
+            st.error(f"Error during dataset generation: {str(e)}")
+            return
+    
+    # Prompt input (for manual testing)
+    st.subheader("✍️ Manual Testing")
     prompt = st.text_area(
         "Enter your prompt",
-        value=get_test_prompt(domain),
+        value=generate_domain_prompt(selected_domain, model_key),
         height=150,
         key="prompt_input"
     )
     
-    # Preview section
-    st.subheader("👀 Preview")
-    if prompt.strip():
-        # Extract evidence using Ollama
-        if st.button("🎯 Extract Evidence", key="extract_evidence"):
-            if not tokenizer:
-                st.warning(f"⚠️ Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
-                # 토크나이저 추가 버튼
-                if st.button("➕ Add Tokenizer", help="현재 모델을 위한 토크나이저를 추가합니다"):
-                    base_model = model_key.split(":")[0]
-                    default_tokenizers = {
-                        "mistral": "mistralai/Mistral-7B-v0.1",
-                        "mixtral": "mistralai/Mixtral-8x7B-v0.1",
-                        "llama2": "meta-llama/Llama-2-7b-hf",
-                        "gemma": "google/gemma-7b",
-                        "qwen": "Qwen/Qwen-7B",
-                        "yi": "01-ai/Yi-6B",
-                        "deepseek": "deepseek-ai/deepseek-coder-7b-base",
-                        "openchat": "openchat/openchat",
-                        "neural": "neural-chat/neural-chat-7b-v3-1",
-                        "phi": "microsoft/phi-2",
-                        "stable": "stabilityai/stable-code-3b"
-                    }
-                    if base_model in default_tokenizers:
-                        if "MODEL_TOKENIZER_MAP" not in st.session_state:
-                            st.session_state.MODEL_TOKENIZER_MAP = MODEL_TOKENIZER_MAP.copy()
-                        st.session_state.MODEL_TOKENIZER_MAP[base_model] = default_tokenizers[base_model]
-                        st.success(f"✅ Added tokenizer for {base_model}: {default_tokenizers[base_model]}")
-                    else:
-                        st.error(f"❌ No default tokenizer found for {base_model}")
-            else:
-                # Tokenize text
-                tokens = tokenizer.tokenize(prompt)
-                with st.spinner("Extracting evidence..."):
-                    evidence_indices, evidence_tokens = extract_evidence_with_ollama(prompt, tokens, model_key)
-                    if evidence_indices and evidence_tokens:
-                        st.markdown("### Extracted Evidence:")
-                        evidence_data = [
-                            {"Index": idx, "Token": token, "Is Evidence": "✅"}
-                            for idx, token in zip(evidence_indices, evidence_tokens)
-                        ]
-                        st.table(evidence_data)
-                        
-                        # 전체 토큰 목록에서 증거 토큰 하이라이트
-                        st.markdown("### All Tokens:")
-                        all_tokens_data = [
-                            {"Index": i, "Token": token, "Is Evidence": "✅" if i in evidence_indices else ""}
-                            for i, token in enumerate(tokens)
-                        ]
-                        st.table(all_tokens_data)
-                    else:
-                        st.warning("No evidence tokens found.")
-
-    # Save section
-    st.subheader("💾 Save")
-    if st.button("📦 Save Evidence Extraction Results"):
-        if not prompt.strip():
-            st.warning("Please enter a prompt.")
-        else:
-            # Double check if selected model is running
-            if not check_ollama_model_status(model_key):
-                st.error(f"❌ Model {model_key} is not running. Please start it in the Model Load tab.")
-                st.stop()
-
-            try:
-                with st.spinner("Extracting and saving evidence..."):
-                    # Get general response
-                    response = get_model_response(model_key, prompt)
-
-                    # Extract evidence
-                    query = f"""Find words from the input prompt that are related to the '{domain}' domain.
-
-Prompt: "{prompt}"
-
-Word list:
-{word_list}
-
-Token information:
-{token_list}
-
-Important notes:
-- Only find words from within the prompt
-- Return empty arrays if no domain-related words are found
-- Words must be used exactly as shown
-- Do not modify or transform words
-- Each word in the evidence array must exactly match a word from the word list
-
-Response rules:
-1. Only find words directly related to the '{domain}' domain from the prompt
-2. Return empty arrays if no related words are found
-3. evidence_word_index should only contain word numbers
-4. evidence should contain exact copies of the words at those numbers
-5. evidence_word_index and evidence arrays must have the same length
-
-Response format:
-{{
-    "evidence_word_index": [word_number1, word_number2, ...],
-    "evidence": ["word1", "word2", ...],
-    "explanation": "Please explain why the selected words are related to the {domain} domain. If no related words are found, write 'No related words found.'"
-}}
-
-Validation:
-1. Each number in evidence_word_index must be a valid word list index
-2. Each word in evidence must match the word at its index
-3. Words must be exact copies of the content between >>> and <<<
-4. Do not include words unrelated to the domain"""
-
-                    evidence_response = get_model_response(model_key, query)
-                    try:
-                        # Extract JSON part from response
-                        import re
-                        json_match = re.search(r'(\{[^{]*\})', evidence_response)
-                        if not json_match:
-                            raise ValueError("Could not find JSON format response")
-                        
-                        evidence_response = json_match.group(1)
-                        result = json.loads(evidence_response)
-                        
-                        # Validate required fields
-                        required_fields = ["evidence_word_index", "evidence", "explanation"]
-                        missing_fields = [field for field in required_fields if field not in result]
-                        if missing_fields:
-                            raise ValueError(f"Missing fields: {', '.join(missing_fields)}")
-                            
-                        evidence_word_index = result["evidence_word_index"]
-                        evidence = result["evidence"]
-                        explanation = result.get("explanation", "")
-
-                        # Validate list format
-                        if not isinstance(evidence_word_index, list):
-                            raise ValueError("evidence_word_index must be an array ([])")
-                        if not isinstance(evidence, list):
-                            raise ValueError("evidence must be an array ([])")
-
-                        # Validate indices
-                        invalid_indices = [i for i in evidence_word_index if not (isinstance(i, int) and 0 <= i < len(words))]
-                        if invalid_indices:
-                            raise ValueError(f"Invalid indices found: {invalid_indices}")
-
-                        # Check if evidence and evidence_word_index lengths match
-                        if len(evidence) != len(evidence_word_index):
-                            raise ValueError(f"Array lengths don't match (evidence: {len(evidence)}, index: {len(evidence_word_index)})")
-
-                        # Check if evidence matches actual words
-                        mismatches = []
-                        for i, idx in enumerate(evidence_word_index):
-                            expected_word = words[idx]
-                            actual_word = evidence[i]
-                            if expected_word != actual_word:
-                                mismatches.append({
-                                    "position": i,
-                                    "index": idx,
-                                    "expected": repr(expected_word),
-                                    "actual": repr(actual_word)
-                                })
-                        
-                        if mismatches:
-                            mismatch_details = [
-                                f"Position {m['position']}: Index {m['index']} word mismatch (expected: {m['expected']}, got: {m['actual']})"
-                                for m in mismatches
-                            ]
-                            raise ValueError(f"Word mismatches:\n" + "\n".join(mismatch_details))
-
-                        # Save
-                        output = {
-                            "input": prompt,
-                            "domain": domain,
-                            "model_response": response,
-                            "words": words,
-                            "evidence_word_index": evidence_word_index,
-                            "evidence": evidence,
-                            "explanation": explanation
-                        }
-
-                        output_dir = Path("dataset_output")
-                        output_dir.mkdir(exist_ok=True)
-                        output_path = output_dir / f"{model_key}_{domain}.jsonl"
-                        with open(output_path, "a", encoding="utf-8") as f:
-                            f.write(json.dumps(output, ensure_ascii=False) + "\n")
-
-                        # Display results
-                        st.success(f"🎉 Save complete: {output_path}")
-                        
-                        # Preview saved results
-                        with st.expander("📋 View Saved Results"):
-                            st.markdown("### Model Response:")
-                            st.markdown(response)
-                            
-                            st.markdown("### Extracted Evidence:")
-                            # Display results word by word
-                            word_results = []
-                            for i, word in enumerate(words):
-                                is_evidence = i in evidence_word_index
-                                word_results.append({
-                                    "Index": i,
-                                    "Word": word,
-                                    "Is Evidence": "✅" if is_evidence else ""
-                                })
-                            st.table(word_results)
-                            
-                            st.markdown("### Evidence Explanation:")
-                            st.markdown(explanation)
-                            
-                            st.markdown("### Complete Results:")
-                            try:
-                                json_data = {
-                                    "evidence_word_index": evidence_word_index,
-                                    "evidence": evidence,
-                                    "explanation": explanation
-                                }
-                                json_str = json.dumps(json_data, ensure_ascii=False)
-                                validated_data = json.loads(json_str)
-                                st.json(validated_data)
-                            except json.JSONDecodeError as e:
-                                st.error(f"JSON 데이터 오류: {str(e)}")
-                                st.code(str(json_data), language="json")
-
-                    except json.JSONDecodeError as e:
-                        st.error(f"Evidence extraction failed. JSON parsing error: {str(e)}")
-                        st.code(evidence_response, language="text")
-                    except ValueError as e:
-                        st.error(f"Evidence extraction failed. Data validation error: {str(e)}")
-                        st.code(evidence_response, language="text")
-                    except Exception as e:
-                        st.error(f"Error during evidence extraction: {str(e)}")
-                        st.code(evidence_response, language="text")
-
-            except Exception as e:
-                st.error(f"❌ Ollama request failed: {e}")
+    # Extract evidence button
+    if st.button("🎯 Extract Evidence", key="extract_evidence"):
+        if not tokenizer:
+            st.warning(f"⚠️ Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
+            return
+        
+        tokens = tokenizer.tokenize(prompt)
+        with st.spinner("Extracting evidence..."):
+            evidence_indices, evidence_tokens = extract_evidence_with_ollama(prompt, tokens, model_key)
+            if evidence_indices and evidence_tokens:
+                st.markdown("### Extracted Evidence:")
+                for idx, token in zip(evidence_indices, evidence_tokens):
+                    st.markdown(f"- **{idx}**: {token}")
