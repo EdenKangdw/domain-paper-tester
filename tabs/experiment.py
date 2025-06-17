@@ -332,7 +332,7 @@ def show():
     st.write("실험 탭입니다. (어텐션 히트맵 및 evidence 분석 기능이 여기에 추가될 예정)")
 
     st.markdown("---")
-    st.subheader(":rocket: 모델 로드/해제")
+    st.subheader(":rocket: huggingface 모델 로드/해제")
     
     # 모델 로드 상태 확인
     is_loaded, loaded_model_name = check_model_loaded()
@@ -377,20 +377,47 @@ def show():
                 selected_prompt = st.selectbox("프롬프트 선택 (최대 100개 미리보기)", prompts)
                 prompt_idx = prompts.index(selected_prompt)
                 path = os.path.join(DATASET_ROOT, selected_domain, selected_file)
-                evidence_tokens = []
-                evidence_indices = []
+                
+                # 선택된 프롬프트의 전체 데이터 로드
                 try:
                     with open(path, "r") as f:
                         for i, line in enumerate(f):
                             if i == prompt_idx:
                                 data = json.loads(line)
+                                # 전체 데이터를 보기 좋게 표시
+                                st.markdown("### 📝 선택된 데이터셋 상세 정보")
+                                st.markdown("**프롬프트:**")
+                                st.markdown(f"```\n{data.get('prompt', '')}\n```")
+                                
+                                st.markdown("### 🔍 Evidence 정보")
                                 evidence_tokens = data.get("evidence_tokens", [])
                                 evidence_indices = data.get("evidence_indices", [])
+                                
+                                # Evidence 토큰과 인덱스를 테이블로 표시
+                                evidence_data = []
+                                for idx, token in zip(evidence_indices, evidence_tokens):
+                                    evidence_data.append({
+                                        "인덱스": idx,
+                                        "토큰": token
+                                    })
+                                if evidence_data:
+                                    st.table(pd.DataFrame(evidence_data))
+                                else:
+                                    st.warning("Evidence 정보가 없습니다.")
+                                
+                                # 메타데이터 표시
+                                st.markdown("### 📊 메타데이터")
+                                meta_data = {
+                                    "도메인": data.get("domain", ""),
+                                    "모델": data.get("model", ""),
+                                    "타임스탬프": data.get("timestamp", ""),
+                                    "인덱스": data.get("index", "")
+                                }
+                                st.json(meta_data)
                                 break
-                except Exception:
-                    pass
-                st.markdown("**evidence tokens:** " + ", ".join([str(t) for t in evidence_tokens]))
-                st.markdown("**evidence indices:** " + ", ".join([str(idx) for idx in evidence_indices]))
+                except Exception as e:
+                    st.error(f"데이터셋 파일을 읽는 중 오류가 발생했습니다: {str(e)}")
+                
                 st.markdown("---")
                 st.subheader("어텐션 실험")
                 if st.button("어텐션 추출 및 토큰화 보기"):
