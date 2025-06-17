@@ -9,8 +9,6 @@ from typing import List, Tuple
 import re
 from datetime import datetime
 import time
-import psutil
-import subprocess
 
 # Model tokenizer settings
 MODEL_TOKENIZER_MAP = {
@@ -550,24 +548,6 @@ Please provide only the prompt without any additional text or explanation."""
         print(f"Error generating prompt: {str(e)}")
         return f"Please enter your {domain} domain prompt here..."
 
-def get_cpu_temperature():
-    """CPU 온도를 가져옵니다."""
-    try:
-        # WSL2에서 CPU 온도 확인
-        temp = subprocess.check_output(['sensors']).decode()
-        # 온도 값 추출 (예: "Core 0:        +80.0°C")
-        temp = float(re.search(r'\+(\d+\.\d+)°C', temp).group(1))
-        return temp
-    except:
-        return None
-
-def check_temperature():
-    """CPU 온도를 확인하고 안전 여부를 판단합니다."""
-    temp = get_cpu_temperature()
-    if temp is not None and temp > 75:  # 75도 이상이면 위험
-        return False, temp
-    return True, temp
-
 def show():
     st.title("Dataset Generator")
     
@@ -620,17 +600,6 @@ def show():
         help="각 도메인별로 생성할 데이터셋의 개수"
     )
     
-    # Safety settings
-    st.subheader("⚠️ Safety Settings")
-    cooldown_interval = st.number_input(
-        "Cooldown interval (seconds)",
-        min_value=1,
-        max_value=60,
-        value=5,
-        step=1,
-        help="데이터셋 생성 간 휴식 시간 (초)"
-    )
-    
     # Generate dataset button
     if st.button("🔄 Generate Dataset", key="generate_dataset"):
         if not tokenizer:
@@ -657,13 +626,6 @@ def show():
                     # Generate datasets
                     with open(output_path, "w", encoding="utf-8") as f:
                         for i in range(num_datasets):
-                            # Check CPU temperature
-                            is_safe, temp = check_temperature()
-                            if not is_safe:
-                                st.error(f"⚠️ CPU temperature too high ({temp}°C). Please wait for the system to cool down.")
-                                time.sleep(cooldown_interval * 2)  # 긴 휴식 시간
-                                continue
-                            
                             # Generate new prompt for the domain
                             prompt = generate_domain_prompt(domain, model_key)
                             
@@ -717,23 +679,18 @@ Rules:
                                     st.text(f"Domain: {domain} ({domain_idx}/{total_domains})")
                                     st.text(f"Generated dataset {i+1}/{num_datasets}")
                                     st.text(f"Prompt: {prompt}")
-                                    if temp is not None:
-                                        st.text(f"CPU Temperature: {temp}°C")
                                 else:
                                     st.warning(f"Could not find JSON in response for dataset {i+1}")
                             except json.JSONDecodeError as e:
                                 st.warning(f"Error parsing evidence response for dataset {i+1}: {str(e)}")
                                 continue
-                            
-                            # Add cooldown period between generations
-                            time.sleep(cooldown_interval)
                     
                     st.success(f"✅ Generated {num_datasets} datasets for {domain} domain")
                     st.success(f"Dataset saved to {output_path}")
                 
                 # Add a small delay between domains
                 if domain_idx < total_domains:
-                    time.sleep(cooldown_interval * 2)  # 도메인 간 더 긴 휴식 시간
+                    time.sleep(1)
             
             st.success(f"🎉 Completed generating datasets for all {total_domains} domains!")
                 

@@ -1,5 +1,5 @@
 import streamlit as st
-from tabs import model_loader, dataset_generator, monitoring
+from tabs import model_loader, dataset_generator, monitoring, experiment, experiment_log
 from utils import check_ollama_installed
 
 # Ollama 설치 확인
@@ -9,7 +9,7 @@ if not is_ollama_ready:
     st.stop()
 
 # 사이드바 탭
-tab = st.sidebar.radio("기능 선택", ["모델 로드", "데이터셋 생성", "모니터링"])
+tab = st.sidebar.radio("기능 선택", ["모델 로드", "데이터셋 생성", "모니터링", "실험", "실험 기록"])
 
 # 선택된 탭에 따라 해당 모듈의 show 함수 호출
 if tab == "모델 로드":
@@ -18,3 +18,7 @@ elif tab == "데이터셋 생성":
     dataset_generator.show()
 elif tab == "모니터링":
     monitoring.show()
+elif tab == "실험":
+    experiment.show()
+elif tab == "실험 기록":
+    experiment_log.show()
