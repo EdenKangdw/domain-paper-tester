@@ -4,6 +4,7 @@ import json
 from utils import get_available_models
 import pandas as pd
 from datetime import datetime
+import pickle
 
 # Huggingface 관련 추가
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -14,6 +15,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 DATASET_ROOT = "dataset"
+MODEL_CACHE_FILE = "model_cache.pkl"
 
 # 글로벌 모델 캐시
 MODEL_CACHE = {
@@ -21,6 +23,37 @@ MODEL_CACHE = {
     "tokenizer": None,
     "model_name": None
 }
+
+def save_model_cache():
+    """모델 캐시 정보를 파일에 저장"""
+    try:
+        cache_info = {
+            "model_name": MODEL_CACHE["model_name"],
+            "timestamp": datetime.now().isoformat()
+        }
+        with open(MODEL_CACHE_FILE, "wb") as f:
+            pickle.dump(cache_info, f)
+    except Exception as e:
+        print(f"캐시 저장 실패: {e}")
+
+def load_model_cache():
+    """파일에서 모델 캐시 정보를 로드"""
+    try:
+        if os.path.exists(MODEL_CACHE_FILE):
+            with open(MODEL_CACHE_FILE, "rb") as f:
+                cache_info = pickle.load(f)
+            return cache_info
+    except Exception as e:
+        print(f"캐시 로드 실패: {e}")
+    return None
+
+def clear_model_cache():
+    """모델 캐시 파일 삭제"""
+    try:
+        if os.path.exists(MODEL_CACHE_FILE):
+            os.remove(MODEL_CACHE_FILE)
+    except Exception as e:
+        print(f"캐시 삭제 실패: {e}")
 
 # 각 도메인별 데이터셋 파일 목록을 가져오는 함수
 def get_dataset_files():
@@ -84,6 +117,8 @@ def load_model_to_session(model_name):
         MODEL_CACHE["model"] = model
         MODEL_CACHE["tokenizer"] = tokenizer
         MODEL_CACHE["model_name"] = model_name
+        # 캐시 정보를 파일에 저장
+        save_model_cache()
         return True
     except Exception as e:
         st.error(f"모델 로딩 실패: {str(e)}")
@@ -105,6 +140,8 @@ def unload_model_from_session():
     MODEL_CACHE["model"] = None
     MODEL_CACHE["tokenizer"] = None
     MODEL_CACHE["model_name"] = None
+    # 캐시 파일 삭제
+    clear_model_cache()
     # GPU 메모리 정리
     torch.cuda.empty_cache()
     st.success("모델이 서버 메모리에서 해제되었습니다.")
@@ -130,13 +167,26 @@ def plot_attention_head_heatmap(attn, tokens, evidence_indices):
     tokens: 토큰 리스트
     evidence_indices: evidence 토큰의 인덱스 리스트
     """
+    # evidence_indices 유효성 검사 및 필터링
+    if not evidence_indices:
+        evidence_indices = []
+    else:
+        # 토큰 길이를 벗어나는 인덱스 제거
+        evidence_indices = [i for i in evidence_indices if 0 <= i < len(tokens)]
+    
     # 각 헤드별로 evidence 토큰(to_token)에 대한 어텐션 평균 계산
     # attn shape: (head, from_token, to_token)
     head_count = attn.shape[0]
     avg_evidence_attention = []
     for h in range(head_count):
         # from_token 전체에서 evidence 토큰(to_token)으로 가는 어텐션 평균
-        avg = attn[h, :, evidence_indices].mean()
+        if evidence_indices:  # evidence_indices가 비어있지 않을 때만 계산
+            try:
+                avg = attn[h, :, evidence_indices].mean()
+            except (IndexError, ValueError):
+                avg = 0.0  # 인덱스 에러 발생 시 0 반환
+        else:
+            avg = 0.0  # evidence_indices가 비어있으면 0 반환
         avg_evidence_attention.append(avg)
     avg_evidence_attention = np.array(avg_evidence_attention)
 
@@ -145,7 +195,7 @@ def plot_attention_head_heatmap(attn, tokens, evidence_indices):
     sns.heatmap(avg_evidence_attention[None, :], annot=True, fmt=".2f", cmap="YlOrRd", cbar=True, ax=ax)
     ax.set_xlabel("Head index")
     ax.set_yticks([])
-    ax.set_title("각 헤드별 evidence 토큰 어텐션 평균")
+    ax.set_title("Average Evidence Attention by Head")
     plt.tight_layout()
     return fig, avg_evidence_attention
 
@@ -155,23 +205,31 @@ def plot_attention_head_token_heatmap(attn, tokens, evidence_indices):
     tokens: 토큰 리스트
     evidence_indices: evidence 토큰의 인덱스 리스트
     """
+    # evidence_indices 유효성 검사 및 필터링
+    if not evidence_indices:
+        evidence_indices = []
+    else:
+        # 토큰 길이를 벗어나는 인덱스 제거
+        evidence_indices = [i for i in evidence_indices if 0 <= i < len(tokens)]
+    
     # 각 헤드별로 to_token(모든 토큰)에 대한 어텐션 평균 (from_token 전체 평균)
     # shape: (head, to_token)
     avg_attn = attn.mean(axis=1)  # (head, to_token)
 
     fig, ax = plt.subplots(figsize=(min(1.2+0.4*len(tokens), 16), 1.5+0.3*avg_attn.shape[0]))
     sns.heatmap(avg_attn, annot=False, cmap="YlGnBu", cbar=True, ax=ax)
-    ax.set_xlabel("토큰 인덱스")
-    ax.set_ylabel("헤드 인덱스")
-    ax.set_title("각 헤드별 토큰 어텐션 평균 히트맵")
+    ax.set_xlabel("Token index")
+    ax.set_ylabel("Head index")
+    ax.set_title("Average Token Attention by Head")
     # x축에 토큰 라벨 표시 (길면 잘림)
     token_labels = [t if i not in evidence_indices else f"*{t}*" for i, t in enumerate(tokens)]
     ax.set_xticks(range(len(tokens)))
     ax.set_xticklabels(token_labels, rotation=90, fontsize=8)
     # evidence 토큰 강조 (x축 라벨 색상)
     for idx in evidence_indices:
-        ax.get_xticklabels()[idx].set_color("red")
-        ax.get_xticklabels()[idx].set_fontweight("bold")
+        if idx < len(ax.get_xticklabels()):  # 인덱스 범위 확인
+            ax.get_xticklabels()[idx].set_color("red")
+            ax.get_xticklabels()[idx].set_fontweight("bold")
     plt.tight_layout()
     return fig, avg_attn
 
@@ -181,6 +239,13 @@ def plot_token_head_attention_heatmap(attn, tokens, evidence_indices):
     tokens: 토큰 리스트
     evidence_indices: evidence 토큰의 인덱스 리스트
     """
+    # evidence_indices 유효성 검사 및 필터링
+    if not evidence_indices:
+        evidence_indices = []
+    else:
+        # 토큰 길이를 벗어나는 인덱스 제거
+        evidence_indices = [i for i in evidence_indices if 0 <= i < len(tokens)]
+    
     # 각 토큰별로 헤드 어텐션 평균 (from_token 전체 평균)
     # shape: (head, to_token)
     avg_attn = attn.mean(axis=1)  # (head, to_token)
@@ -188,17 +253,18 @@ def plot_token_head_attention_heatmap(attn, tokens, evidence_indices):
     avg_attn_t = avg_attn.T  # (to_token, head)
     fig, ax = plt.subplots(figsize=(min(1.2+0.4*len(tokens), 16), 1.5+0.3*avg_attn_t.shape[1]))
     sns.heatmap(avg_attn_t, annot=False, cmap="YlGnBu", cbar=True, ax=ax)
-    ax.set_ylabel("토큰 인덱스")
-    ax.set_xlabel("헤드 인덱스")
-    ax.set_title("토큰별 헤드 어텐션 평균 히트맵")
+    ax.set_ylabel("Token index")
+    ax.set_xlabel("Head index")
+    ax.set_title("Average Head Attention by Token")
     # y축에 토큰 라벨 표시 (길면 잘림)
     token_labels = [t if i not in evidence_indices else f"*{t}*" for i, t in enumerate(tokens)]
     ax.set_yticks(range(len(tokens)))
     ax.set_yticklabels(token_labels, rotation=0, fontsize=8)
     # evidence 토큰 강조 (y축 라벨 색상)
     for idx in evidence_indices:
-        ax.get_yticklabels()[idx].set_color("red")
-        ax.get_yticklabels()[idx].set_fontweight("bold")
+        if idx < len(ax.get_yticklabels()):  # 인덱스 범위 확인
+            ax.get_yticklabels()[idx].set_color("red")
+            ax.get_yticklabels()[idx].set_fontweight("bold")
     plt.tight_layout()
     return fig, avg_attn_t
 
@@ -267,7 +333,13 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
                 head_count = last_attn.shape[0]
                 avg_evidence_attention = []
                 for h in range(head_count):
-                    avg = last_attn[h, :, evidence_indices].mean() if evidence_indices else 0.0
+                    if evidence_indices:  # evidence_indices가 비어있지 않을 때만 계산
+                        try:
+                            avg = last_attn[h, :, evidence_indices].mean()
+                        except (IndexError, ValueError):
+                            avg = 0.0  # 인덱스 에러 발생 시 0 반환
+                    else:
+                        avg = 0.0  # evidence_indices가 비어있으면 0 반환
                     avg_evidence_attention.append(avg)
                 max_head = int(np.argmax(avg_evidence_attention))
                 results.append({
@@ -276,7 +348,9 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
                     "max_head": max_head,
                     "avg_evidence_attention": avg_evidence_attention[max_head],
                     "evidence_indices": evidence_indices,
-                    "tokens": tokens
+                    "tokens": tokens,
+                    "model_name": model_name,
+                    "tokenizer_name": tokenizer.name_or_path if hasattr(tokenizer, 'name_or_path') else "unknown"
                 })
             except Exception as e:
                 continue
@@ -309,27 +383,61 @@ def save_experiment_result(results, model_name):
 def check_model_loaded():
     """
     서버 메모리에 모델이 로드되어 있는지 확인합니다.
-    세션에 없으면 글로벌 캐시에서 복구합니다.
+    세션에 없으면 글로벌 캐시에서 복구하고, 그것도 없으면 파일 캐시에서 복구합니다.
     """
     try:
+        # 1. 먼저 세션 상태 확인
         if 'model' in st.session_state and 'tokenizer' in st.session_state:
             model = st.session_state['model']
             if model is not None:
                 return True, st.session_state.get('model_name', '알 수 없는 모델')
-        # 세션에 없으면 글로벌에서 복구
-        elif MODEL_CACHE["model"] is not None and MODEL_CACHE["tokenizer"] is not None:
+        
+        # 2. 세션에 없으면 글로벌 캐시에서 복구
+        if MODEL_CACHE["model"] is not None and MODEL_CACHE["tokenizer"] is not None:
             st.session_state['model'] = MODEL_CACHE["model"]
             st.session_state['tokenizer'] = MODEL_CACHE["tokenizer"]
             st.session_state['model_name'] = MODEL_CACHE["model_name"]
             return True, MODEL_CACHE["model_name"]
+        
+        # 3. 글로벌 캐시에도 없으면 파일 캐시에서 복구 시도
+        cache_info = load_model_cache()
+        if cache_info and cache_info.get('model_name'):
+            model_name = cache_info['model_name']
+            # 모델을 다시 로드
+            if load_model_to_session(model_name):
+                return True, model_name
+        
+        # 4. 세션에 모델 이름만 있고 실제 모델이 없는 경우 (새로고침 후)
+        if 'model_name' in st.session_state and st.session_state['model_name']:
+            model_name = st.session_state['model_name']
+            # 모델을 다시 로드
+            if load_model_to_session(model_name):
+                return True, model_name
+        
         return False, None
     except Exception as e:
         print(f"모델 체크 중 에러 발생: {str(e)}")
         return False, None
 
 def show():
+    # 페이지 로드 시 자동으로 모델 상태 복구 시도
+    if 'model_auto_restored' not in st.session_state:
+        st.session_state['model_auto_restored'] = True
+        # 자동 복구 시도 (조용히)
+        try:
+            is_loaded, loaded_model_name = check_model_loaded()
+            if is_loaded:
+                st.session_state['auto_restored_model'] = loaded_model_name
+        except Exception:
+            pass
+    
     st.title("실험 탭")
-    st.write("실험 탭입니다. (어텐션 히트맵 및 evidence 분석 기능이 여기에 추가될 예정)")
+    st.write("실험 탭입니다. (어텐션 히트맵 및 evidence 분석 기능이 여기에 추가됨)")
+
+    # 자동 복구된 모델이 있으면 알림
+    if 'auto_restored_model' in st.session_state:
+        st.success(f"이전에 로드된 {st.session_state['auto_restored_model']} 모델이 자동으로 복구되었습니다.")
+        del st.session_state['auto_restored_model']
 
     st.markdown("---")
     st.subheader(":rocket: huggingface 모델 로드/해제")
@@ -353,16 +461,14 @@ def show():
             else:
                 if load_model_to_session(selected_model):
                     st.success(f"모델 {selected_model}이(가) 서버 메모리에 로드되었습니다.")
-                    # 모델 로드 후 상태 업데이트
-                    is_loaded, loaded_model_name = check_model_loaded()
+                    st.rerun()  # 페이지 새로고침하여 상태 업데이트
     with col2:
         if st.button("모델 해제"):
             if not is_loaded:
                 st.warning("로드된 모델이 없습니다.")
             else:
                 unload_model_from_session()
-                # 모델 해제 후 상태 업데이트
-                is_loaded, loaded_model_name = check_model_loaded()
+                st.rerun()  # 페이지 새로고침하여 상태 업데이트
 
     # 모델이 로드되어 있으면 실험 UI
     if is_loaded:
