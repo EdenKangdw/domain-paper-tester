@@ -17,6 +17,17 @@ import seaborn as sns
 DATASET_ROOT = "dataset"
 MODEL_CACHE_FILE = "model_cache.pkl"
 
+# 모델별 실험 결과 저장 경로
+def get_model_experiment_path(model_name):
+    """모델별 실험 결과 저장 경로를 반환합니다."""
+    safe_model_name = model_name.replace(':', '_').replace('/', '_')
+    return f"experiment_results/{safe_model_name}"
+
+def get_model_dataset_path(model_name):
+    """모델별 데이터셋 저장 경로를 반환합니다."""
+    safe_model_name = model_name.replace(':', '_').replace('/', '_')
+    return f"dataset/{safe_model_name}"
+
 # 글로벌 모델 캐시
 MODEL_CACHE = {
     "model": None,
@@ -55,7 +66,95 @@ def clear_model_cache():
     except Exception as e:
         print(f"캐시 삭제 실패: {e}")
 
-# 각 도메인별 데이터셋 파일 목록을 가져오는 함수
+def create_model_directories(model_name):
+    """모델별 디렉토리를 생성합니다."""
+    experiment_path = get_model_experiment_path(model_name)
+    dataset_path = get_model_dataset_path(model_name)
+    
+    os.makedirs(experiment_path, exist_ok=True)
+    os.makedirs(dataset_path, exist_ok=True)
+    
+    # 도메인별 하위 디렉토리 생성
+    domains = ["general", "technical", "legal", "medical"]
+    for domain in domains:
+        os.makedirs(os.path.join(dataset_path, domain), exist_ok=True)
+    
+    return experiment_path, dataset_path
+
+def get_model_dataset_files(model_name):
+    """특정 모델의 데이터셋 파일 목록을 가져옵니다."""
+    dataset_path = get_model_dataset_path(model_name)
+    domains = ["general", "technical", "legal", "medical"]
+    files = {}
+    
+    for domain in domains:
+        domain_path = os.path.join(dataset_path, domain)
+        if os.path.exists(domain_path):
+            files[domain] = [f for f in os.listdir(domain_path) if f.endswith(".jsonl")]
+        else:
+            files[domain] = []
+    
+    return files
+
+def get_model_prompts(model_name, domain, filename, max_count=10000):
+    """특정 모델의 데이터셋에서 프롬프트 리스트를 추출합니다."""
+    dataset_path = get_model_dataset_path(model_name)
+    path = os.path.join(dataset_path, domain, filename)
+    prompts = []
+    
+    try:
+        with open(path, "r") as f:
+            for i, line in enumerate(f):
+                if i >= max_count:
+                    break
+                try:
+                    data = json.loads(line)
+                    prompt = data.get("prompt", "(no prompt)")
+                    prompts.append(prompt)
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return prompts
+
+def copy_original_dataset_to_model(model_name):
+    """원본 데이터셋을 모델별 디렉토리로 복사합니다."""
+    original_dataset_path = DATASET_ROOT
+    model_dataset_path = get_model_dataset_path(model_name)
+    
+    if not os.path.exists(original_dataset_path):
+        st.error("원본 데이터셋이 존재하지 않습니다.")
+        return False
+    
+    try:
+        # 원본 데이터셋의 모든 파일을 모델별 디렉토리로 복사
+        domains = ["general", "technical", "legal", "medical"]
+        for domain in domains:
+            original_domain_path = os.path.join(original_dataset_path, domain)
+            model_domain_path = os.path.join(model_dataset_path, domain)
+            
+            if os.path.exists(original_domain_path):
+                # 도메인 디렉토리 생성
+                os.makedirs(model_domain_path, exist_ok=True)
+                
+                # 파일 복사
+                for filename in os.listdir(original_domain_path):
+                    if filename.endswith('.jsonl'):
+                        original_file = os.path.join(original_domain_path, filename)
+                        model_file = os.path.join(model_domain_path, filename)
+                        
+                        # 파일이 없으면 복사
+                        if not os.path.exists(model_file):
+                            import shutil
+                            shutil.copy2(original_file, model_file)
+        
+        st.success(f"{model_name} 모델용 데이터셋이 준비되었습니다.")
+        return True
+    except Exception as e:
+        st.error(f"데이터셋 복사 중 오류 발생: {str(e)}")
+        return False
+
+# 각 도메인별 데이터셋 파일 목록을 가져오는 함수 (기존 호환성 유지)
 def get_dataset_files():
     domains = ["general", "technical", "legal", "medical"]
     files = {}
@@ -67,7 +166,7 @@ def get_dataset_files():
             files[domain] = []
     return files
 
-# 선택한 데이터셋 파일에서 프롬프트 리스트를 추출하는 함수 (최대 10000개)
+# 선택한 데이터셋 파일에서 프롬프트 리스트를 추출하는 함수 (기존 호환성 유지)
 def get_prompts(domain, filename, max_count=10000):
     path = os.path.join(DATASET_ROOT, domain, filename)
     prompts = []
@@ -281,38 +380,23 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
     if 'model' in st.session_state and 'tokenizer' in st.session_state:
         model = st.session_state['model']
         tokenizer = st.session_state['tokenizer']
+        model_loaded_in_session = True
     else:
-        # 모델명 변환
-        model_map = {
-            'mistral:7b': 'mistralai/Mistral-7B-v0.1',
-            'llama2:7b': 'meta-llama/Llama-2-7b-hf',
-        }
-        hf_model = model_map.get(model_name)
-        if not hf_model:
-            return results
-        try:
-            # 서버 메모리에 새로 모델 로드
-            tokenizer = AutoTokenizer.from_pretrained(hf_model)
-            quant_config = BitsAndBytesConfig(load_in_8bit=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                hf_model,
-                quantization_config=quant_config,
-                device_map="auto",
-                torch_dtype=torch.float16
-            )
-        except Exception as e:
-            return results
+        st.error("모델이 세션에 로드되어 있지 않습니다. 실험을 진행하려면 먼저 모델을 로드해주세요.")
+        return results
 
     for domain, file_list in files.items():
         if not file_list:
             continue
         selected_file = file_list[0]  # 각 도메인 첫 번째 파일 사용(확장 가능)
-        prompts = get_prompts(domain, selected_file, max_count=10000)
+        # 모델별 데이터셋에서 프롬프트 가져오기
+        prompts = get_model_prompts(model_name, domain, selected_file, max_count=10000)
         if not prompts:
             continue
         # 프롬프트 샘플링
         sampled = prompts[:num_prompts]
-        path = os.path.join(DATASET_ROOT, domain, selected_file)
+        # 모델별 데이터셋 경로 사용
+        path = os.path.join(get_model_dataset_path(model_name), domain, selected_file)
         with open(path, "r") as f:
             lines = f.readlines()
         for prompt in sampled:
@@ -355,17 +439,17 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
             except Exception as e:
                 continue
 
-    # 세션에서 로드한 모델이 아닌 경우에만 서버 메모리에서 해제
-    if 'model' not in st.session_state:
-        del model
-        torch.cuda.empty_cache()
     return results
 
 def save_experiment_result(results, model_name):
-    """실험 결과를 experiment_results 폴더에 저장 (numpy 타입을 모두 변환)"""
-    os.makedirs("experiment_results", exist_ok=True)
+    """실험 결과를 모델별 experiment_results 폴더에 저장 (numpy 타입을 모두 변환)"""
+    # 모델별 디렉토리 생성
+    experiment_path = get_model_experiment_path(model_name)
+    os.makedirs(experiment_path, exist_ok=True)
+    
     now = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"experiment_results/{now}_{model_name.replace(':','_')}.json"
+    filename = f"{experiment_path}/{now}_{model_name.replace(':','_')}.json"
+    
     # numpy 타입을 모두 파이썬 기본 타입으로 변환
     def convert(o):
         if isinstance(o, np.generic):
@@ -379,6 +463,41 @@ def save_experiment_result(results, model_name):
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(results_converted, f, ensure_ascii=False, indent=2)
     return filename
+
+def list_model_experiment_results(model_name):
+    """특정 모델의 실험 결과 파일 목록을 반환합니다."""
+    experiment_path = get_model_experiment_path(model_name)
+    if not os.path.exists(experiment_path):
+        return []
+    
+    files = [f for f in os.listdir(experiment_path) if f.endswith(".json")]
+    files.sort(reverse=True)
+    return files
+
+def load_model_experiment_result(model_name, filename):
+    """특정 모델의 실험 결과를 로드합니다."""
+    experiment_path = get_model_experiment_path(model_name)
+    path = os.path.join(experiment_path, filename)
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def get_all_model_experiments():
+    """모든 모델의 실험 결과를 조회합니다."""
+    experiment_root = "experiment_results"
+    if not os.path.exists(experiment_root):
+        return {}
+    
+    model_experiments = {}
+    for model_dir in os.listdir(experiment_root):
+        model_path = os.path.join(experiment_root, model_dir)
+        if os.path.isdir(model_path):
+            # 디렉토리명을 모델명으로 변환
+            model_name = model_dir.replace('_', '/').replace('_', ':')
+            files = [f for f in os.listdir(model_path) if f.endswith(".json")]
+            if files:
+                model_experiments[model_name] = files
+    
+    return model_experiments
 
 def check_model_loaded():
     """
@@ -472,146 +591,184 @@ def show():
 
     # 모델이 로드되어 있으면 실험 UI
     if is_loaded:
-        files = get_dataset_files()
-        domains = list(files.keys())
-        selected_domain = st.selectbox("도메인 선택", domains)
-        dataset_files = files[selected_domain]
-        if dataset_files:
-            selected_file = st.selectbox("데이터셋 파일 선택", dataset_files)
-            prompts = get_prompts(selected_domain, selected_file)
-            if prompts:
-                selected_prompt = st.selectbox("프롬프트 선택 (최대 100개 미리보기)", prompts)
-                prompt_idx = prompts.index(selected_prompt)
-                path = os.path.join(DATASET_ROOT, selected_domain, selected_file)
+        st.markdown("---")
+        st.subheader(":gear: 모델별 실험 설정")
+        
+        # 모델별 데이터셋 준비
+        with st.expander("📁 모델별 데이터셋 준비", expanded=False):
+            st.markdown("""
+            **모델별 실험을 위해 데이터셋을 준비합니다:**
+            - 각 모델마다 별도의 데이터셋 디렉토리가 생성됩니다.
+            - 원본 데이터셋이 모델별 디렉토리로 복사됩니다.
+            - 모델별로 독립적인 실험 환경을 구성할 수 있습니다.
+            """)
+            
+            if st.button("현재 모델용 데이터셋 준비"):
+                with st.spinner(f"{loaded_model_name} 모델용 데이터셋을 준비하는 중..."):
+                    if copy_original_dataset_to_model(loaded_model_name):
+                        st.success(f"{loaded_model_name} 모델용 데이터셋이 준비되었습니다.")
+                        st.rerun()
+        
+        # 모델별 데이터셋 확인
+        model_dataset_files = get_model_dataset_files(loaded_model_name)
+        has_model_dataset = any(files for files in model_dataset_files.values())
+        
+        if has_model_dataset:
+            st.success(f"✅ {loaded_model_name} 모델용 데이터셋이 준비되어 있습니다.")
+            
+            # 모델별 실험 UI
+            st.markdown("---")
+            st.subheader(":microscope: 모델별 실험")
+            
+            domains = list(model_dataset_files.keys())
+            selected_domain = st.selectbox("도메인 선택", domains, key="model_domain")
+            dataset_files = model_dataset_files[selected_domain]
+            
+            if dataset_files:
+                selected_file = st.selectbox("데이터셋 파일 선택", dataset_files, key="model_file")
+                prompts = get_model_prompts(loaded_model_name, selected_domain, selected_file)
                 
-                # 선택된 프롬프트의 전체 데이터 로드
-                try:
-                    with open(path, "r") as f:
-                        for i, line in enumerate(f):
-                            if i == prompt_idx:
-                                data = json.loads(line)
-                                # 전체 데이터를 보기 좋게 표시
-                                st.markdown("### 📝 선택된 데이터셋 상세 정보")
-                                st.markdown("**프롬프트:**")
-                                st.markdown(f"```\n{data.get('prompt', '')}\n```")
-                                
-                                st.markdown("### 🔍 Evidence 정보")
-                                evidence_tokens = data.get("evidence_tokens", [])
-                                evidence_indices = data.get("evidence_indices", [])
-                                
-                                # Evidence 토큰과 인덱스를 테이블로 표시
-                                evidence_data = []
-                                for idx, token in zip(evidence_indices, evidence_tokens):
-                                    evidence_data.append({
-                                        "인덱스": idx,
-                                        "토큰": token
-                                    })
-                                if evidence_data:
-                                    st.table(pd.DataFrame(evidence_data))
+                if prompts:
+                    selected_prompt = st.selectbox("프롬프트 선택 (최대 100개 미리보기)", prompts, key="model_prompt")
+                    prompt_idx = prompts.index(selected_prompt)
+                    path = os.path.join(get_model_dataset_path(loaded_model_name), selected_domain, selected_file)
+                    
+                    # 선택된 프롬프트의 전체 데이터 로드
+                    try:
+                        with open(path, "r") as f:
+                            for i, line in enumerate(f):
+                                if i == prompt_idx:
+                                    data = json.loads(line)
+                                    # 전체 데이터를 보기 좋게 표시
+                                    st.markdown("### 📝 선택된 데이터셋 상세 정보")
+                                    st.markdown("**프롬프트:**")
+                                    st.markdown(f"```\n{data.get('prompt', '')}\n```")
+                                    
+                                    st.markdown("### 🔍 Evidence 정보")
+                                    evidence_tokens = data.get("evidence_tokens", [])
+                                    evidence_indices = data.get("evidence_indices", [])
+                                    
+                                    # Evidence 토큰과 인덱스를 테이블로 표시
+                                    evidence_data = []
+                                    for idx, token in zip(evidence_indices, evidence_tokens):
+                                        evidence_data.append({
+                                            "인덱스": idx,
+                                            "토큰": token
+                                        })
+                                    if evidence_data:
+                                        st.table(pd.DataFrame(evidence_data))
+                                    else:
+                                        st.warning("Evidence 정보가 없습니다.")
+                                    
+                                    # 메타데이터 표시
+                                    st.markdown("### 📊 메타데이터")
+                                    meta_data = {
+                                        "도메인": data.get("domain", ""),
+                                        "모델": data.get("model", ""),
+                                        "타임스탬프": data.get("timestamp", ""),
+                                        "인덱스": data.get("index", "")
+                                    }
+                                    st.json(meta_data)
+                                    break
+                    except Exception as e:
+                        st.error(f"데이터셋 파일을 읽는 중 오류가 발생했습니다: {str(e)}")
+                    
+                    st.markdown("---")
+                    st.subheader("어텐션 실험")
+                    if st.button("어텐션 추출 및 토큰화 보기"):
+                        with st.spinner("모델에서 어텐션 추출 중..."):
+                            attentions, tokens, token_ids = get_attention_from_session(selected_prompt)
+                        if attentions is None:
+                            st.error("해당 모델은 지원되지 않거나 로드에 실패했습니다.")
+                        else:
+                            st.markdown(f"**토큰화 결과:** {' | '.join(tokens)}")
+                            evidence_set = set(evidence_tokens)
+                            colored = []
+                            for t in tokens:
+                                if t in evidence_set:
+                                    colored.append(f"<span style='background-color: #ffe066'>{t}</span>")
                                 else:
-                                    st.warning("Evidence 정보가 없습니다.")
-                                
-                                # 메타데이터 표시
-                                st.markdown("### 📊 메타데이터")
-                                meta_data = {
-                                    "도메인": data.get("domain", ""),
-                                    "모델": data.get("model", ""),
-                                    "타임스탬프": data.get("timestamp", ""),
-                                    "인덱스": data.get("index", "")
-                                }
-                                st.json(meta_data)
-                                break
-                except Exception as e:
-                    st.error(f"데이터셋 파일을 읽는 중 오류가 발생했습니다: {str(e)}")
-                
-                st.markdown("---")
-                st.subheader("어텐션 실험")
-                if st.button("어텐션 추출 및 토큰화 보기"):
-                    with st.spinner("모델에서 어텐션 추출 중..."):
-                        attentions, tokens, token_ids = get_attention_from_session(selected_prompt)
-                    if attentions is None:
-                        st.error("해당 모델은 지원되지 않거나 로드에 실패했습니다.")
-                    else:
-                        st.markdown(f"**토큰화 결과:** {' | '.join(tokens)}")
-                        evidence_set = set(evidence_tokens)
-                        colored = []
-                        for t in tokens:
-                            if t in evidence_set:
-                                colored.append(f"<span style='background-color: #ffe066'>{t}</span>")
-                            else:
-                                colored.append(t)
-                        st.markdown("**evidence 토큰 강조:**<br>" + ' '.join(colored), unsafe_allow_html=True)
-                        st.info(f"어텐션 shape: {len(attentions)} layers, {attentions[-1].shape[1]} heads, {attentions[-1].shape[2]} tokens")
-                        last_attn = attentions[-1][0]
-                        fig, avg_evidence_attention = plot_attention_head_heatmap(last_attn, tokens, evidence_indices)
-                        st.pyplot(fig)
-                        max_head = int(np.argmax(avg_evidence_attention))
-                        st.success(f"가장 evidence에 강하게 반응하는 헤드: Head {max_head} (평균 어텐션 {avg_evidence_attention[max_head]:.4f})")
-                        fig2, avg_attn = plot_attention_head_token_heatmap(last_attn, tokens, evidence_indices)
-                        st.markdown("---")
-                        st.subheader("헤드별 토큰 어텐션 히트맵")
-                        st.pyplot(fig2)
-                        st.caption("* x축: 토큰 인덱스 (evidence 토큰은 빨간색), y축: 헤드 인덱스, 값: 어텐션 평균 *")
-                        st.markdown("---")
-                        st.subheader("토큰별 헤드 어텐션 히트맵")
-                        fig3, avg_attn_t = plot_token_head_attention_heatmap(last_attn, tokens, evidence_indices)
-                        st.pyplot(fig3)
-                        st.caption("* y축: 토큰 인덱스(문자열, evidence 토큰은 빨간색), x축: 헤드 인덱스, 값: 어텐션 평균 *")
+                                    colored.append(t)
+                            st.markdown("**evidence 토큰 강조:**<br>" + ' '.join(colored), unsafe_allow_html=True)
+                            st.info(f"어텐션 shape: {len(attentions)} layers, {attentions[-1].shape[1]} heads, {attentions[-1].shape[2]} tokens")
+                            last_attn = attentions[-1][0]
+                            fig, avg_evidence_attention = plot_attention_head_heatmap(last_attn, tokens, evidence_indices)
+                            st.pyplot(fig)
+                            max_head = int(np.argmax(avg_evidence_attention))
+                            st.success(f"가장 evidence에 강하게 반응하는 헤드: Head {max_head} (평균 어텐션 {avg_evidence_attention[max_head]:.4f})")
+                            fig2, avg_attn = plot_attention_head_token_heatmap(last_attn, tokens, evidence_indices)
+                            st.markdown("---")
+                            st.subheader("헤드별 토큰 어텐션 히트맵")
+                            st.pyplot(fig2)
+                            st.caption("* x축: 토큰 인덱스 (evidence 토큰은 빨간색), y축: 헤드 인덱스, 값: 어텐션 평균 *")
+                            st.markdown("---")
+                            st.subheader("토큰별 헤드 어텐션 히트맵")
+                            fig3, avg_attn_t = plot_token_head_attention_heatmap(last_attn, tokens, evidence_indices)
+                            st.pyplot(fig3)
+                            st.caption("* y축: 토큰 인덱스(문자열, evidence 토큰은 빨간색), x축: 헤드 인덱스, 값: 어텐션 평균 *")
+                else:
+                    st.warning("해당 파일에서 프롬프트를 불러올 수 없습니다.")
             else:
-                st.warning("해당 파일에서 프롬프트를 불러올 수 없습니다.")
+                st.warning(f"{selected_domain} 도메인에 데이터셋 파일이 없습니다.")
         else:
-            st.warning(f"{selected_domain} 도메인에 데이터셋 파일이 없습니다.")
+            st.warning(f"⚠️ {loaded_model_name} 모델용 데이터셋이 준비되지 않았습니다. 위의 '모델별 데이터셋 준비' 버튼을 클릭하여 데이터셋을 준비해주세요.")
 
         # 일괄 실험 섹션 추가
         st.markdown("---")
-        st.subheader(":rocket: 일괄 실험")
+        st.subheader(":rocket: 모델별 일괄 실험")
         
-        # 실험 설정
-        num_prompts = st.number_input("도메인별 프롬프트 수", min_value=1, max_value=10000, value=5)
-        
-        # 실험 시작/중지 버튼
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("실험 시작"):
-                st.session_state['experiment_running'] = True
-                st.session_state['experiment_results'] = []
+        if has_model_dataset:
+            # 실험 설정
+            num_prompts = st.number_input("도메인별 프롬프트 수", min_value=1, max_value=10000, value=5)
+            
+            # 실험 시작 버튼
+            if st.button("모델별 실험 시작"):
+                st.info("실험을 시작합니다. 이 작업은 시간이 오래 걸릴 수 있습니다.")
                 
-                # 진행 상황 표시를 위한 프로그레스 바
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                
-                # 전체 도메인 수 계산
-                total_domains = len([d for d, files in files.items() if files])
-                current_domain = 0
-                
-                for domain, file_list in files.items():
-                    if not file_list:
-                        continue
-                    
-                    if not st.session_state.get('experiment_running', False):
-                        st.warning("실험이 중단되었습니다.")
-                        break
-                    
-                    current_domain += 1
-                    status_text.text(f"진행 중: {domain} 도메인 ({current_domain}/{total_domains})")
-                    progress_bar.progress(current_domain / total_domains)
-                    
-                    results = batch_domain_experiment(loaded_model_name, {domain: file_list}, num_prompts)
-                    st.session_state['experiment_results'].extend(results)
-                
-                if st.session_state.get('experiment_running', False):
-                    # 실험 결과 저장
-                    filename = save_experiment_result(st.session_state['experiment_results'], loaded_model_name)
-                    st.success(f"실험이 완료되었습니다. 결과가 {filename}에 저장되었습니다.")
-                
-                # 세션 상태 초기화
-                st.session_state['experiment_running'] = False
-                progress_bar.empty()
-                status_text.empty()
-        
-        with col2:
-            if st.button("실험 중단"):
-                st.session_state['experiment_running'] = False
-                st.warning("실험 중단 요청이 전송되었습니다. 현재 진행 중인 도메인이 완료되면 중단됩니다.")
+                # 실험 실행
+                try:
+                    with st.spinner("실험을 실행하는 중입니다..."):
+                        # 전체 도메인에 대해 실험 실행
+                        all_results = []
+                        total_domains = len([d for d, files in model_dataset_files.items() if files])
+                        current_domain = 0
+                        
+                        for domain, file_list in model_dataset_files.items():
+                            if not file_list:
+                                continue
+                            
+                            current_domain += 1
+                            st.text(f"진행 중: {domain} 도메인 ({current_domain}/{total_domains})")
+                            
+                            results = batch_domain_experiment(loaded_model_name, {domain: file_list}, num_prompts)
+                            all_results.extend(results)
+                        
+                        # 실험 결과 저장
+                        if all_results:
+                            filename = save_experiment_result(all_results, loaded_model_name)
+                            st.success(f"✅ 실험이 완료되었습니다!")
+                            st.success(f"📁 결과가 저장되었습니다: {filename}")
+                            st.info(f"📊 총 {len(all_results)}개의 실험 결과가 생성되었습니다.")
+                            
+                            # 결과 미리보기
+                            st.markdown("### 📋 실험 결과 미리보기")
+                            preview_data = []
+                            for result in all_results[:5]:  # 처음 5개만 표시
+                                preview_data.append({
+                                    "도메인": result["domain"],
+                                    "최대 어텐션 헤드": result["max_head"],
+                                    "평균 어텐션": f"{result['avg_evidence_attention']:.4f}",
+                                    "Evidence 토큰 수": len(result["evidence_indices"])
+                                })
+                            if preview_data:
+                                st.table(pd.DataFrame(preview_data))
+                        else:
+                            st.warning("실험 결과가 생성되지 않았습니다.")
+                            
+                except Exception as e:
+                    st.error(f"실험 중 오류가 발생했습니다: {str(e)}")
+                    st.error("모델이 제대로 로드되어 있는지 확인해주세요.")
+        else:
+            st.warning("모델별 데이터셋이 준비되지 않아 일괄 실험을 수행할 수 없습니다.")
     else:
         st.warning("모델이 로드되어 있지 않습니다. 실험을 진행하려면 먼저 모델을 로드해주세요.")
