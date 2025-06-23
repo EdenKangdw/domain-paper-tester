@@ -194,6 +194,17 @@ def load_model_to_session(model_name):
     model_map = {
         'mistral:7b': 'mistralai/Mistral-7B-v0.1',
         'llama2:7b': 'meta-llama/Llama-2-7b-hf',
+        'gemma:7b': 'google/gemma-7b',
+        'gemma:2b': 'google/gemma-2b',
+        'qwen:7b': 'Qwen/Qwen-7B',
+        'qwen:14b': 'Qwen/Qwen-14B',
+        'deepseek:7b': 'deepseek-ai/deepseek-llm-7b-base',
+        'yi:6b': '01-ai/Yi-6B',
+        'yi:34b': '01-ai/Yi-34B',
+        'openchat:7b': 'openchat/openchat-3.5-7b',
+        'neural:7b': 'microsoft/DialoGPT-medium',
+        'phi:2.7b': 'microsoft/phi-2',
+        'stable:7b': 'stabilityai/stablelm-base-alpha-7b',
     }
     hf_model = model_map.get(model_name)
     if not hf_model:
@@ -202,13 +213,36 @@ def load_model_to_session(model_name):
     try:
         # 모델과 토크나이저를 서버 메모리에 로드
         tokenizer = AutoTokenizer.from_pretrained(hf_model)
-        quant_config = BitsAndBytesConfig(load_in_8bit=True)
-        model = AutoModelForCausalLM.from_pretrained(
-            hf_model,
-            quantization_config=quant_config,
-            device_map="auto",
-            torch_dtype=torch.float16
-        )
+        
+        # 모델별 특별한 토크나이저 설정
+        if 'gemma' in model_name.lower():
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.padding_side = "right"
+        elif 'llama' in model_name.lower():
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.padding_side = "right"
+        elif 'qwen' in model_name.lower():
+            tokenizer.pad_token = tokenizer.eos_token
+            tokenizer.padding_side = "right"
+        
+        # 모델 로딩 시도
+        try:
+            quant_config = BitsAndBytesConfig(load_in_8bit=True)
+            model = AutoModelForCausalLM.from_pretrained(
+                hf_model,
+                quantization_config=quant_config,
+                device_map="auto",
+                torch_dtype=torch.float16
+            )
+        except Exception as quant_error:
+            # 8비트 양자화 실패 시 16비트로 시도
+            st.warning("8비트 양자화 로딩 실패, 16비트로 시도합니다...")
+            model = AutoModelForCausalLM.from_pretrained(
+                hf_model,
+                device_map="auto",
+                torch_dtype=torch.float16
+            )
+        
         # 세션 상태와 글로벌 캐시에 참조 저장
         st.session_state['model'] = model
         st.session_state['tokenizer'] = tokenizer
@@ -221,6 +255,7 @@ def load_model_to_session(model_name):
         return True
     except Exception as e:
         st.error(f"모델 로딩 실패: {str(e)}")
+        st.error("모델명을 확인하거나 인터넷 연결을 확인해주세요.")
         return False
 
 def unload_model_from_session():
@@ -566,12 +601,57 @@ def show():
     if is_loaded:
         st.success(f"현재 {loaded_model_name} 모델이 서버 메모리에 로드되어 있습니다.")
     
-    model_list = get_available_models()
-    if model_list:
-        selected_model = st.selectbox("사용할 모델을 선택하세요", model_list, key="session_model")
-    else:
-        selected_model = st.text_input("사용할 모델명을 직접 입력하세요 (예: llama2:7b)", key="session_model_input")
+    # Hugging Face 모델 목록 (실험용)
+    hf_model_list = [
+        "mistral:7b",
+        "llama2:7b", 
+        "gemma:7b",
+        "gemma:2b",
+        "qwen:7b",
+        "qwen:14b",
+        "deepseek:7b",
+        "yi:6b",
+        "yi:34b",
+        "openchat:7b",
+        "neural:7b",
+        "phi:2.7b",
+        "stable:7b"
+    ]
     
+    # Ollama 모델 목록 (참고용)
+    ollama_model_list = get_available_models()
+    
+    # 모델 선택 방식
+    model_selection_method = st.radio(
+        "모델 선택 방식",
+        ["Hugging Face 모델 (실험용)", "Ollama 모델 (참고용)", "직접 입력"],
+        horizontal=True,
+        key="model_selection_method"
+    )
+    
+    if model_selection_method == "Hugging Face 모델 (실험용)":
+        selected_model = st.selectbox(
+            "사용할 Hugging Face 모델을 선택하세요", 
+            hf_model_list, 
+            key="hf_model_select"
+        )
+        st.info("💡 Hugging Face 모델은 어텐션 실험에 사용됩니다.")
+        
+    elif model_selection_method == "Ollama 모델 (참고용)":
+        if ollama_model_list:
+            selected_model = st.selectbox(
+                "설치된 Ollama 모델 목록 (참고용)", 
+                ollama_model_list, 
+                key="ollama_model_select"
+            )
+            st.warning("⚠️ Ollama 모델은 어텐션 실험을 지원하지 않습니다. Hugging Face 모델을 사용해주세요.")
+        else:
+            selected_model = st.text_input("설치된 Ollama 모델이 없습니다. 직접 입력하세요", key="ollama_model_input")
+            st.warning("⚠️ Ollama 모델은 어텐션 실험을 지원하지 않습니다.")
+    else:
+        selected_model = st.text_input("모델명을 직접 입력하세요 (예: mistral:7b)", key="custom_model_input")
+        st.info("💡 지원되는 모델: mistral:7b, llama2:7b, gemma:7b, qwen:7b 등")
+
     col1, col2 = st.columns(2)
     with col1:
         if st.button("모델 로드"):
