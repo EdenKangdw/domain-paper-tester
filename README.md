@@ -104,4 +104,21 @@ MIT License
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request 
+5. Open a Pull Request
+
+# Hugging Face 토큰(.env) 설정 방법
+
+1. [Hugging Face 토큰 발급](https://huggingface.co/settings/tokens)
+   - "New token" 클릭
+   - 이름 입력, 권한은 **Read**로 설정
+   - 토큰 복사 (hf_로 시작)
+
+2. 프로젝트 루트에 `.env` 파일 생성 후 아래와 같이 입력
+
+```
+HUGGINGFACE_TOKEN=hf_your_actual_token_here
+```
+
+3. python-dotenv가 자동으로 .env 파일을 읽어 환경변수로 등록합니다.
+
+4. Llama-2 등 gated 모델을 사용할 경우, Hugging Face에서 모델 접근 승인을 받아야 합니다. 

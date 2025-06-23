@@ -9,6 +9,14 @@ from typing import List, Tuple
 import re
 from datetime import datetime
 import time
+import os
+
+# .env 파일 로드
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    st.warning("python-dotenv가 설치되지 않았습니다. pip install python-dotenv로 설치해주세요.")
 
 # Model tokenizer settings
 MODEL_TOKENIZER_MAP = {
@@ -525,16 +533,35 @@ def load_tokenizer(model_key):
             tokenizer_name = MODEL_TOKENIZER_MAP.get(base_model)  # 기본 모델명으로 시도
         
         if tokenizer_name:
+            # Hugging Face 토큰 확인
+            hf_token = os.getenv('HUGGINGFACE_TOKEN')
+            
             # 특별한 설정이 필요한 모델들
             if "qwen" in model_key.lower():
-                return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+                if hf_token:
+                    return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
+                else:
+                    return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
             elif "gemma" in model_key.lower():
-                tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+                if hf_token:
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+                else:
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
                 tokenizer.pad_token = tokenizer.eos_token
                 tokenizer.padding_side = "right"
                 return tokenizer
+            elif "llama" in model_key.lower():
+                # Llama 모델은 토큰이 필요할 수 있음
+                if hf_token:
+                    return AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+                else:
+                    st.warning("Llama 모델에 접근하려면 HUGGINGFACE_TOKEN 환경변수를 설정해주세요.")
+                    return None
             else:
-                return AutoTokenizer.from_pretrained(tokenizer_name)
+                if hf_token:
+                    return AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+                else:
+                    return AutoTokenizer.from_pretrained(tokenizer_name)
         
         st.error(f"Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
         return None
