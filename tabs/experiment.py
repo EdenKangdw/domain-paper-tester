@@ -263,7 +263,6 @@ def load_model_to_session(model_name):
                     config=config,
                     quantization_config=quant_config,
                     device_map="auto",
-                    torch_dtype=torch.float16,
                     trust_remote_code=True
                 )
             else:
@@ -271,29 +270,53 @@ def load_model_to_session(model_name):
                     hf_model,
                     quantization_config=quant_config,
                     device_map="auto",
-                    torch_dtype=torch.float16,
                     trust_remote_code=True,
                     attn_implementation="eager"
                 )
         except Exception as quant_error:
             # 8비트 양자화 실패 시 16비트로 시도
             st.warning("8비트 양자화 로딩 실패, 16비트로 시도합니다...")
-            if 'qwen' in model_name.lower():
-                model = AutoModelForCausalLM.from_pretrained(
-                    hf_model,
-                    config=config,
-                    device_map="auto",
-                    torch_dtype=torch.float16,
-                    trust_remote_code=True
-                )
-            else:
-                model = AutoModelForCausalLM.from_pretrained(
-                    hf_model,
-                    device_map="auto",
-                    torch_dtype=torch.float16,
-                    trust_remote_code=True,
-                    attn_implementation="eager"
-                )
+            try:
+                if 'qwen' in model_name.lower():
+                    model = AutoModelForCausalLM.from_pretrained(
+                        hf_model,
+                        config=config,
+                        device_map="auto",
+                        trust_remote_code=True
+                    )
+                else:
+                    model = AutoModelForCausalLM.from_pretrained(
+                        hf_model,
+                        device_map="auto",
+                        trust_remote_code=True,
+                        attn_implementation="eager"
+                    )
+            except Exception as device_error:
+                # device_map 실패 시 CPU로 시도
+                st.warning("자동 디바이스 매핑 실패, CPU로 로드합니다...")
+                if 'qwen' in model_name.lower():
+                    model = AutoModelForCausalLM.from_pretrained(
+                        hf_model,
+                        config=config,
+                        trust_remote_code=True
+                    )
+                else:
+                    model = AutoModelForCausalLM.from_pretrained(
+                        hf_model,
+                        trust_remote_code=True,
+                        attn_implementation="eager"
+                    )
+        
+        # 8비트 양자화된 모델은 이미 올바른 디바이스로 설정되어 있음
+        # device_map="auto"를 사용한 경우 추가 디바이스 이동 불필요
+        try:
+            # 모델의 현재 디바이스 확인
+            device = next(model.parameters()).device
+            st.info(f"모델이 {device} 디바이스에 로드되었습니다.")
+        except Exception as device_error:
+            st.warning(f"디바이스 확인 실패: {str(device_error)}")
+            # 기본값으로 CPU 설정
+            device = torch.device("cpu")
         
         # 세션 상태와 글로벌 캐시에 참조 저장
         st.session_state['model'] = model
@@ -339,7 +362,14 @@ def get_attention_from_session(prompt):
     if model is None or tokenizer is None:
         return None, None, None
     inputs = tokenizer(prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    # 모델의 디바이스 확인 및 입력 이동
+    try:
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+    except Exception as device_error:
+        # 디바이스 확인 실패 시 CPU 사용
+        inputs = {k: v.to('cpu') for k, v in inputs.items()}
+    
     with torch.no_grad():
         outputs = model(**inputs, output_attentions=True)
     attentions = tuple(attn.cpu().numpy() for attn in outputs.attentions)
@@ -454,7 +484,75 @@ def plot_token_head_attention_heatmap(attn, tokens, evidence_indices):
     plt.tight_layout()
     return fig, avg_attn_t
 
-def batch_domain_experiment(model_name, files, num_prompts=5):
+def analyze_head_attention_pattern(attn, tokens, evidence_indices, target_head=27):
+    """
+    특정 헤드의 attention 패턴을 분석하여 evidence 토큰에만 특별히 반응하는지 확인
+    attn: (head, from_token, to_token) numpy array (마지막 레이어)
+    tokens: 토큰 리스트
+    evidence_indices: evidence 토큰의 인덱스 리스트
+    target_head: 분석할 헤드 번호
+    """
+    # evidence_indices 유효성 검사 및 필터링
+    if not evidence_indices:
+        evidence_indices = []
+    else:
+        # 토큰 길이를 벗어나는 인덱스 제거
+        evidence_indices = [i for i in evidence_indices if 0 <= i < len(tokens)]
+    
+    if target_head >= attn.shape[0]:
+        return None, None, None
+    
+    # 특정 헤드의 attention 패턴 (from_token 전체 평균)
+    head_attention = attn[target_head].mean(axis=0)  # (to_token,)
+    
+    # evidence 토큰과 non-evidence 토큰 분리
+    evidence_attention = head_attention[evidence_indices] if evidence_indices else np.array([])
+    non_evidence_indices = [i for i in range(len(tokens)) if i not in evidence_indices]
+    non_evidence_attention = head_attention[non_evidence_indices] if non_evidence_indices else np.array([])
+    
+    # 통계 계산
+    stats = {
+        'evidence_mean': float(evidence_attention.mean()) if len(evidence_attention) > 0 else 0.0,
+        'evidence_std': float(evidence_attention.std()) if len(evidence_attention) > 0 else 0.0,
+        'non_evidence_mean': float(non_evidence_attention.mean()) if len(non_evidence_attention) > 0 else 0.0,
+        'non_evidence_std': float(non_evidence_attention.std()) if len(non_evidence_attention) > 0 else 0.0,
+        'evidence_count': len(evidence_attention),
+        'non_evidence_count': len(non_evidence_attention),
+        'attention_ratio': float(evidence_attention.mean() / non_evidence_attention.mean()) if len(non_evidence_attention) > 0 and non_evidence_attention.mean() > 0 else 0.0
+    }
+    
+    # 시각화
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+    
+    # 1. 전체 attention 패턴
+    ax1.bar(range(len(tokens)), head_attention, alpha=0.7, color='lightblue')
+    # evidence 토큰 강조
+    for idx in evidence_indices:
+        ax1.bar(idx, head_attention[idx], color='red', alpha=0.8)
+    ax1.set_xlabel('Token Index')
+    ax1.set_ylabel('Attention Weight')
+    ax1.set_title(f'Head {target_head} Attention Pattern')
+    ax1.set_xticks(range(len(tokens)))
+    ax1.set_xticklabels([t[:10] + '...' if len(t) > 10 else t for t in tokens], rotation=45, ha='right')
+    
+    # 2. Evidence vs Non-evidence 비교
+    categories = ['Evidence Tokens', 'Non-Evidence Tokens']
+    means = [stats['evidence_mean'], stats['non_evidence_mean']]
+    stds = [stats['evidence_std'], stats['non_evidence_std']]
+    
+    bars = ax2.bar(categories, means, yerr=stds, capsize=5, alpha=0.7, color=['red', 'lightblue'])
+    ax2.set_ylabel('Average Attention Weight')
+    ax2.set_title(f'Head {target_head}: Evidence vs Non-Evidence Attention')
+    
+    # 값 표시
+    for i, (bar, mean, std) in enumerate(zip(bars, means, stds)):
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + std + 0.001, 
+                f'{mean:.4f}\n±{std:.4f}', ha='center', va='bottom')
+    
+    plt.tight_layout()
+    return fig, stats, head_attention
+
+def batch_domain_experiment(model_name, files, num_prompts=20):
     """
     여러 도메인에 대해 evidence 어텐션 실험을 일괄 수행하고 통계 집계
     model_name: 사용할 모델명
@@ -523,7 +621,14 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
                 
                 # 어텐션 추출
                 inputs = tokenizer(prompt, return_tensors="pt")
-                inputs = {k: v.to(model.device) for k, v in inputs.items()}
+                # 모델의 디바이스 확인 및 입력 이동
+                try:
+                    device = next(model.parameters()).device
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                except Exception as device_error:
+                    # 디바이스 확인 실패 시 CPU 사용
+                    inputs = {k: v.to('cpu') for k, v in inputs.items()}
+                
                 with torch.no_grad():
                     try:
                         outputs = model(**inputs, output_attentions=True)
@@ -542,7 +647,7 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
                 last_attn = attentions[-1][0]  # (head, from_token, to_token)
                 # 헤드별 evidence 어텐션 평균
                 head_count = last_attn.shape[0]
-                avg_evidence_attention = []
+                avg_evidence_attention_whole = []
                 for h in range(head_count):
                     if evidence_indices:  # evidence_indices가 비어있지 않을 때만 계산
                         try:
@@ -551,13 +656,14 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
                             avg = 0.0  # 인덱스 에러 발생 시 0 반환
                     else:
                         avg = 0.0  # evidence_indices가 비어있으면 0 반환
-                    avg_evidence_attention.append(avg)
-                max_head = int(np.argmax(avg_evidence_attention))
+                    avg_evidence_attention_whole.append(avg)
+                max_head = int(np.argmax(avg_evidence_attention_whole))
                 results.append({
                     "domain": domain,
                     "prompt": prompt,
                     "max_head": max_head,
-                    "avg_evidence_attention": avg_evidence_attention[max_head],
+                    "avg_evidence_attention": avg_evidence_attention_whole[max_head],  # 기존 max값 (호환성 유지)
+                    "avg_evidence_attention_whole": avg_evidence_attention_whole,  # 32차원 리스트 전체 저장
                     "evidence_indices": evidence_indices,
                     "tokens": tokens,
                     "model_name": model_name,
@@ -839,8 +945,8 @@ def show():
             "실험할 프롬프트 수",
             min_value=1,
             max_value=10000,
-            value=5,
-            help="각 도메인별로 실험할 프롬프트의 개수 (최대 10000개)"
+            value=20,
+            help="각 도메인별로 실험할 프롬프트의 개수 (최대 10000개, 권장: 20-50개)"
         )
     
     with col5:

@@ -14,14 +14,15 @@ st.set_page_config(
 def initialize_app():
     """앱 초기화 및 모듈 로드"""
     # 모듈들을 미리 로드하여 캐시
-    from tabs import model_loader, dataset_generator, evidence_extractor, experiment, experiment_log, monitoring
+    from tabs import model_loader, dataset_generator, evidence_extractor, experiment, experiment_log, monitoring, result_analyzer
     return {
         'model_loader': model_loader,
         'dataset_generator': dataset_generator,
         'evidence_extractor': evidence_extractor,
         'experiment': experiment,
         'experiment_log': experiment_log,
-        'monitoring': monitoring
+        'monitoring': monitoring,
+        'result_analyzer': result_analyzer
     }
 
 # 앱 모듈들 초기화
@@ -34,7 +35,7 @@ st.sidebar.title("🧠 Navigation")
 # 페이지 선택
 page = st.sidebar.selectbox(
     "페이지 선택",
-    ["🏠 홈", "🤖 모델 로드", "📝 도메인 프롬프트 생성", "🔍 Evidence 추출", "🔬 실험", "📊 실험기록", "📈 모니터링"],
+    ["🏠 홈", "🤖 모델 로드", "📝 도메인 프롬프트 생성", "🔍 Evidence 추출", "🔬 실험", "📊 실험기록", "📈 모니터링", "🔍 결과 분석", "🧑‍🔬 도메인 분류기", "🛠️ 도메인 분류기 학습"],
     index=0
 )
 
@@ -130,3 +131,14 @@ elif page == "📊 실험기록":
 
 elif page == "📈 모니터링":
     st.session_state.app_modules['monitoring'].show()
+
+elif page == "🔍 결과 분석":
+    st.session_state.app_modules['result_analyzer'].show()
+
+elif page == "🧑‍🔬 도메인 분류기":
+    from tabs import domain_classifier
+    domain_classifier.show()
+
+elif page == "🛠️ 도메인 분류기 학습":
+    from tabs import domain_classifier_trainer
+    domain_classifier_trainer.show()

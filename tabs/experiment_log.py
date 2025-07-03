@@ -105,6 +105,7 @@ def show():
                     
                     # 기본 데이터프레임 표시
                     st.markdown("### 📊 기본 실험 결과")
+                    # 기존 avg_evidence_attention은 max값이므로 그대로 사용
                     st.dataframe(df[["domain", "max_head", "avg_evidence_attention"]])
                     
                     # 도메인별 헤드 분포 설명
@@ -248,18 +249,21 @@ def show():
                             ax4.set_title(f'{domain} Domain Evidence Attention Distribution')
                             ax4.set_xlabel('Evidence Attention')
                             ax4.set_ylabel('Frequency')
+                            ax4.set_ylabel('Frequency')
                             st.pyplot(fig4)
 
                     # 프롬프트 길이 영향 분석
                     with st.expander("📝 프롬프트 길이 영향 분석", expanded=False):
+                        # 새로운 변수명이 있으면 사용, 없으면 기존 변수명 사용
+                        attention_col = "avg_evidence_attention_whole" if "avg_evidence_attention_whole" in df.columns else "avg_evidence_attention"
                         df['prompt_length'] = df['prompt'].str.len()
                         df['token_count'] = df['tokens'].apply(len)
                         fig5, (ax5, ax6) = plt.subplots(1,2,figsize=(12,5))
-                        ax5.scatter(df['prompt_length'], df['avg_evidence_attention'], alpha=0.6)
+                        ax5.scatter(df['prompt_length'], df[attention_col], alpha=0.6)
                         ax5.set_xlabel('Prompt Length (characters)')
                         ax5.set_ylabel('Evidence Attention')
                         ax5.set_title('Prompt Length vs Evidence Attention')
-                        ax6.scatter(df['token_count'], df['avg_evidence_attention'], alpha=0.6)
+                        ax6.scatter(df['token_count'], df[attention_col], alpha=0.6)
                         ax6.set_xlabel('Token Count')
                         ax6.set_ylabel('Evidence Attention')
                         ax6.set_title('Token Count vs Evidence Attention')
@@ -314,13 +318,15 @@ def show():
                             if 'model_name' in df.columns and len(df) > 0:
                                 model_info = df['model_name'].iloc[0] if df['model_name'].iloc[0] else "알 수 없음"
                             
+                            # 새로운 변수명이 있으면 사용, 없으면 기존 변수명 사용
+                            attention_col = "avg_evidence_attention_whole" if "avg_evidence_attention_whole" in df.columns else "avg_evidence_attention"
                             comparison_data.append({
                                 "실험명": exp_name,
                                 "모델": model_info,
                                 "총 샘플 수": len(df),
                                 "도메인 수": len(df['domain'].unique()),
-                                "평균 Evidence Attention": round(df['avg_evidence_attention'].mean(), 4),
-                                "최대 Evidence Attention": round(df['avg_evidence_attention'].max(), 4),
+                                "평균 Evidence Attention": round(df[attention_col].mean(), 4),
+                                "최대 Evidence Attention": round(df[attention_col].max(), 4),
                                 "가장 많이 사용된 헤드": f"헤드 {df['max_head'].value_counts().idxmax()}",
                                 "헤드 다양성": len(df['max_head'].unique())
                             })
@@ -336,7 +342,9 @@ def show():
                         fig, ax = plt.subplots(figsize=(12, 6))
                         
                         for i, (exp_name, df) in enumerate(experiment_data.items()):
-                            domain_means = df.groupby('domain')['avg_evidence_attention'].mean()
+                            # 새로운 변수명이 있으면 사용, 없으면 기존 변수명 사용
+                            attention_col = "avg_evidence_attention_whole" if "avg_evidence_attention_whole" in df.columns else "avg_evidence_attention"
+                            domain_means = df.groupby('domain')[attention_col].mean()
                             ax.plot(domain_means.index, domain_means.values, 
                                    marker='o', label=exp_name, linewidth=2, markersize=8)
                         
@@ -353,12 +361,14 @@ def show():
                         # 모든 실험의 헤드 사용 빈도를 통합
                         combined_data = []
                         for exp_name, df in experiment_data.items():
+                            # 새로운 변수명이 있으면 사용, 없으면 기존 변수명 사용
+                            attention_col = "avg_evidence_attention_whole" if "avg_evidence_attention_whole" in df.columns else "avg_evidence_attention"
                             for _, row in df.iterrows():
                                 combined_data.append({
                                     'experiment': exp_name,
                                     'domain': row['domain'],
                                     'max_head': row['max_head'],
-                                    'avg_evidence_attention': row['avg_evidence_attention']
+                                    'avg_evidence_attention': row[attention_col]
                                 })
                         
                         combined_df = pd.DataFrame(combined_data)
@@ -408,7 +418,9 @@ def show():
                         
                         # 각 실험별로 히스토그램 그리기
                         for exp_name, df in experiment_data.items():
-                            ax_dist.hist(df['avg_evidence_attention'], bins=20, alpha=0.6, label=exp_name, density=True)
+                            # 새로운 변수명이 있으면 사용, 없으면 기존 변수명 사용
+                            attention_col = "avg_evidence_attention_whole" if "avg_evidence_attention_whole" in df.columns else "avg_evidence_attention"
+                            ax_dist.hist(df[attention_col], bins=20, alpha=0.6, label=exp_name, density=True)
                         
                         ax_dist.set_xlabel('Evidence Attention')
                         ax_dist.set_ylabel('Density')
