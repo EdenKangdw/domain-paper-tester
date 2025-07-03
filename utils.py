@@ -161,35 +161,52 @@ def start_ollama_model(model_name):
 def stop_ollama_model():
     """모델 중지"""
     try:
-        st.write("🛑 모델 프로세스를 종료하는 중...")
+        st.write("🛑 모델을 중지하는 중...")
         
-        # 실행 중인 ollama 프로세스 찾기
-        process = Popen(
-            "ps aux | grep 'ollama run' | grep -v grep | awk '{print $2}'",
-            shell=True,
-            stdout=PIPE,
-            stderr=PIPE,
-            text=True
-        )
-        pid = process.stdout.read().strip()
+        # 먼저 실행 중인 모델 목록 확인
+        response = requests.get(f"{OLLAMA_API_BASE}/api/ps", timeout=5)
+        if response.status_code != 200:
+            return False, "Ollama 서버에 연결할 수 없습니다."
         
-        if pid:
-            # 프로세스 종료
-            kill_process = Popen(
-                f"kill {pid}",
-                shell=True,
-                stdout=PIPE,
-                stderr=PIPE,
-                text=True
-            )
-            kill_process.wait()
-            
-            if kill_process.returncode == 0:
-                return True, "모델이 성공적으로 중지되었습니다."
-            else:
-                return False, "모델 프로세스 종료 중 오류가 발생했습니다."
-        else:
+        running_models = response.json().get("models", [])
+        if not running_models:
             return True, "실행 중인 모델이 없습니다."
+        
+        # 모든 실행 중인 모델 중지
+        stopped_count = 0
+        for model_info in running_models:
+            model_name = model_info.get("name")
+            if model_name:
+                try:
+                    # Ollama API를 사용해서 모델 중지 (더 안전한 방법)
+                    # 빈 프롬프트로 짧은 요청을 보내서 모델을 종료시킴
+                    stop_response = requests.post(
+                        f"{OLLAMA_API_BASE}/api/generate",
+                        json={
+                            "model": model_name,
+                            "prompt": "stop",
+                            "stream": False,
+                            "options": {
+                                "num_predict": 1,
+                                "temperature": 0
+                            }
+                        },
+                        timeout=3
+                    )
+                    
+                    if stop_response.status_code == 200:
+                        stopped_count += 1
+                        st.write(f"✅ {model_name} 모델 중지됨")
+                    else:
+                        st.write(f"⚠️ {model_name} 모델 중지 실패 (상태 코드: {stop_response.status_code})")
+                        
+                except Exception as e:
+                    st.write(f"❌ {model_name} 모델 중지 중 오류: {str(e)}")
+        
+        if stopped_count > 0:
+            return True, f"{stopped_count}개 모델이 성공적으로 중지되었습니다."
+        else:
+            return False, "모델 중지에 실패했습니다."
             
     except Exception as e:
         return False, f"예상치 못한 오류가 발생했습니다: {str(e)}"
@@ -231,10 +248,11 @@ def chat_with_model(model_name, prompt):
         st.error(f"요청 중 오류 발생: {str(e)}")
         return f"오류 발생: {str(e)}"
 
+@st.cache_data(ttl=30)  # 30초 캐시
 def get_available_models():
-    """Ollama에서 사용 가능한 모델 목록 조회"""
+    """Ollama에서 사용 가능한 모델 목록 조회 (캐시됨)"""
     try:
-        response = requests.get(f"{OLLAMA_API_BASE}/api/tags")
+        response = requests.get(f"{OLLAMA_API_BASE}/api/tags", timeout=5)
         if response.status_code == 200:
             models = response.json().get("models", [])
             return [model["name"] for model in models]
@@ -267,6 +285,7 @@ def get_model_parameters(model_name):
         'samantha': ['7B'],
         'phind': ['34B'],
         'deepseek': ['7B', '67B'],
+        'deepseek-r1-distill-llama': ['8B'],
         'solar': ['7B', '10.7B'],
         'meditron': ['7B'],
         'xwin': ['7B', '13B', '70B'],
@@ -328,4 +347,395 @@ def fetch_ollama_models():
         
     except Exception as e:
         st.error(f"모델 목록 가져오기 실패: {str(e)}")
-        return [] 
+        return []
+
+def extract_evidence_with_ollama(prompt, tokens, model_key, domain):
+    """
+    Ollama 모델을 사용하여 프롬프트에서 evidence 토큰을 추출합니다.
+    
+    Args:
+        prompt (str): 원본 프롬프트
+        tokens (list): 토크나이저로 분리된 토큰 리스트
+        model_key (str): 사용할 모델 이름
+        domain (str): 도메인 이름
+    
+    Returns:
+        tuple: (evidence_indices, evidence_tokens)
+    """
+    try:
+        # 도메인별 evidence 추출 프롬프트 생성
+        domain_prompts = {
+            "General": "일반적인 상식, 사실, 정보와 관련된 토큰들을 찾아주세요.",
+            "Legal": "법률, 규정, 계약, 권리, 의무와 관련된 토큰들을 찾아주세요.",
+            "Medical": "의학, 건강, 질병, 치료, 약물과 관련된 토큰들을 찾아주세요.",
+            "Technical": "기술, 과학, 엔지니어링, 컴퓨터, 시스템과 관련된 토큰들을 찾아주세요."
+        }
+        
+        domain_instruction = domain_prompts.get(domain, "도메인 관련 중요한 토큰들을 찾아주세요.")
+        
+        # Evidence 추출을 위한 프롬프트 구성
+        evidence_prompt = f"""
+다음 프롬프트에서 {domain} 도메인과 관련된 evidence 토큰들을 추출해주세요.
+
+{domain_instruction}
+
+프롬프트: {prompt}
+
+토큰 리스트: {tokens}
+
+위 토큰 리스트에서 {domain} 도메인과 관련된 evidence 토큰들만 리스트로 응답해주세요.
+예시: ["의학", "치료", "약물", "진단"]
+
+응답 형식:
+["토큰1", "토큰2", "토큰3", ...]
+"""
+        
+        # Ollama API 호출
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/api/generate",
+            json={
+                "model": model_key,
+                "prompt": evidence_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "num_predict": 100
+                }
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            response_text = result.get("response", "").strip()
+            
+            # 응답에서 토큰 리스트 추출
+            import re
+            import ast
+            
+            # JSON 형태의 리스트 추출 시도
+            tokens_match = re.search(r'\[["\']([^"\']*(?:["\'][^"\']*["\'][^"\']*)*)["\']\]', response_text)
+            
+            if tokens_match:
+                try:
+                    # 전체 리스트를 파싱
+                    list_match = re.search(r'\[[^\]]+\]', response_text)
+                    if list_match:
+                        evidence_tokens = ast.literal_eval(list_match.group())
+                        if isinstance(evidence_tokens, list):
+                            # 실제 토큰 리스트에서 인덱스 찾기
+                            indices = []
+                            for token in evidence_tokens:
+                                if token in tokens:
+                                    # 토큰의 모든 인덱스 찾기
+                                    for i, t in enumerate(tokens):
+                                        if t == token:
+                                            indices.append(i)
+                            
+                            # 중복 제거 및 정렬
+                            indices = sorted(list(set(indices)))
+                            return indices, evidence_tokens
+                except:
+                    pass
+            
+            # 대안: 따옴표로 둘러싸인 토큰들 추출
+            quoted_tokens = re.findall(r'["\']([^"\']+)["\']', response_text)
+            if quoted_tokens:
+                evidence_tokens = quoted_tokens
+                # 실제 토큰 리스트에서 인덱스 찾기
+                indices = []
+                for token in evidence_tokens:
+                    if token in tokens:
+                        # 토큰의 모든 인덱스 찾기
+                        for i, t in enumerate(tokens):
+                            if t == token:
+                                indices.append(i)
+                
+                # 중복 제거 및 정렬
+                indices = sorted(list(set(indices)))
+                return indices, evidence_tokens
+            
+            # 마지막 대안: 공백으로 구분된 단어들 추출
+            words = re.findall(r'\b\w+\b', response_text)
+            evidence_tokens = [word for word in words if word in tokens]
+            if evidence_tokens:
+                indices = []
+                for token in evidence_tokens:
+                    if token in tokens:
+                        for i, t in enumerate(tokens):
+                            if t == token:
+                                indices.append(i)
+                
+                indices = sorted(list(set(indices)))
+                return indices, evidence_tokens
+            
+            return [], []
+        else:
+            print(f"Ollama API 오류: {response.status_code}")
+            return [], []
+            
+    except Exception as e:
+        print(f"Evidence 추출 중 오류: {str(e)}")
+        return [], []
+
+def get_model_response(model_name, prompt):
+    """모델에서 응답을 받아 프롬프트만 반환합니다 (response는 저장하지 않음)"""
+    try:
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/api/generate",
+            json={
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                    "num_predict": 200
+                }
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            response_text = result.get("response", "").strip()
+            return response_text
+        else:
+            print(f"API 요청 실패: {response.status_code}")
+            return f"Please enter your prompt here..."
+            
+    except Exception as e:
+        print(f"모델 응답 요청 중 오류: {str(e)}")
+        return f"Please enter your prompt here..."
+
+@st.cache_data(ttl=30)  # 30초 캐시
+def get_available_models():
+    """Ollama에서 사용 가능한 모델 목록 조회 (캐시됨)"""
+    try:
+        response = requests.get(f"{OLLAMA_API_BASE}/api/tags", timeout=5)
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            return [model["name"] for model in models]
+        return []
+    except:
+        return []
+
+def get_model_parameters(model_name):
+    """모델의 파라미터 수를 반환"""
+    model_params = {
+        'llama2': ['7B', '13B', '70B'],
+        'llama2-uncensored': ['7B', '13B'],
+        'mistral': ['7B'],
+        'mixtral': ['8x7B'],
+        'gemma': ['2B', '7B'],
+        'qwen': ['7B', '14B', '72B'],
+        'yi': ['6B', '34B'],
+        'openchat': ['7B'],
+        'neural': ['7B'],
+        'falcon': ['7B', '40B'],
+        'dolphin': ['7B'],
+        'vicuna': ['7B', '13B'],
+        'zephyr': ['7B'],
+        'nous-hermes': ['7B', '13B'],
+        'orca': ['3B', '13B'],
+        'starling': ['7B'],
+        'openhermes': ['7B', '13B'],
+        'wizard': ['7B', '13B'],
+        'stable-beluga': ['7B', '13B'],
+        'samantha': ['7B'],
+        'phind': ['34B'],
+        'deepseek': ['7B', '67B'],
+        'deepseek-r1': ['7B'],
+        'solar': ['7B', '10.7B'],
+        'meditron': ['7B'],
+        'xwin': ['7B', '13B', '70B'],
+        'tinyllama': ['1.1B'],
+        'phi': ['2.7B'],
+        'notus': ['7B'],
+        'codellama': ['7B', '13B', '34B'],
+        'wizardcoder': ['13B', '15B', '34B']
+    }
+    
+    # 모델 이름에서 버전 정보 제거 (파라미터 수 무시)
+    base_model = model_name.split(':')[0]
+    
+    # 기본 모델 이름으로 검색
+    for key in model_params:
+        if key.lower() == base_model.lower():
+            return model_params[key]
+    
+    return []
+
+def fetch_ollama_models():
+    """Ollama 허브에서 사용 가능한 LLM 모델 목록 가져오기"""
+    try:
+        st.write("🔍 Ollama LLM 모델 목록을 가져오는 중...")
+        
+        response = requests.get("https://ollama.com/library", timeout=10)
+        response.raise_for_status()
+        
+        # HTML 응답에서 모델 이름 추출
+        models = re.findall(r'"/library/([^"]+)"', response.text)
+        
+        # LLM이 아닌 모델들 필터링
+        excluded_keywords = [
+            'coder', 'code', 'instruct', 'solar', 'phi', 
+            'neural-chat', 'wizard-math', 'dolphin', 
+            'stablelm', 'starcoder', 'wizardcoder'
+        ]
+        
+        # LLM 모델만 필터링하고 파라미터 정보 추가
+        llm_models = []
+        for model in models:
+            # 제외할 키워드가 모델 이름에 포함되어 있는지 확인
+            if not any(keyword in model.lower() for keyword in excluded_keywords):
+                params = get_model_parameters(model)
+                # 파라미터 정보가 있는 모델만 추가
+                if params:
+                    base_name = model.split(':')[0]
+                    # 각 파라미터 버전별로 별도의 항목 추가
+                    for param in params:
+                        param_code = param.lower().replace('x', '')  # 8x7B -> 7b
+                        model_code = f"{base_name}:{param_code}"
+                        llm_models.append({
+                            'name': base_name,
+                            'code': model_code,
+                            'parameters': param
+                        })
+        
+        return sorted(llm_models, key=lambda x: (x['name'], x['parameters']))
+        
+    except Exception as e:
+        st.error(f"모델 목록 가져오기 실패: {str(e)}")
+        return []
+
+def extract_evidence_with_ollama(prompt, tokens, model_key, domain):
+    """
+    Ollama 모델을 사용하여 프롬프트에서 evidence 토큰을 추출합니다.
+    
+    Args:
+        prompt (str): 원본 프롬프트
+        tokens (list): 토크나이저로 분리된 토큰 리스트
+        model_key (str): 사용할 모델 이름
+        domain (str): 도메인 이름
+    
+    Returns:
+        tuple: (evidence_indices, evidence_tokens)
+    """
+    try:
+        # 도메인별 evidence 추출 프롬프트 생성
+        domain_prompts = {
+            "General": "일반적인 상식, 사실, 정보와 관련된 토큰들을 찾아주세요.",
+            "Legal": "법률, 규정, 계약, 권리, 의무와 관련된 토큰들을 찾아주세요.",
+            "Medical": "의학, 건강, 질병, 치료, 약물과 관련된 토큰들을 찾아주세요.",
+            "Technical": "기술, 과학, 엔지니어링, 컴퓨터, 시스템과 관련된 토큰들을 찾아주세요."
+        }
+        
+        domain_instruction = domain_prompts.get(domain, "도메인 관련 중요한 토큰들을 찾아주세요.")
+        
+        # Evidence 추출을 위한 프롬프트 구성
+        evidence_prompt = f"""
+다음 프롬프트에서 {domain} 도메인과 관련된 evidence 토큰들을 추출해주세요.
+
+{domain_instruction}
+
+프롬프트: {prompt}
+
+토큰 리스트: {tokens}
+
+위 토큰 리스트에서 {domain} 도메인과 관련된 evidence 토큰들만 리스트로 응답해주세요.
+예시: ["의학", "치료", "약물", "진단"]
+
+응답 형식:
+["토큰1", "토큰2", "토큰3", ...]
+"""
+        
+        # Ollama API 호출
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/api/generate",
+            json={
+                "model": model_key,
+                "prompt": evidence_prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "num_predict": 100
+                }
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            response_text = result.get("response", "").strip()
+            
+            # 응답에서 토큰 리스트 추출
+            import re
+            import ast
+            
+            # JSON 형태의 리스트 추출 시도
+            tokens_match = re.search(r'\[["\']([^"\']*(?:["\'][^"\']*["\'][^"\']*)*)["\']\]', response_text)
+            
+            if tokens_match:
+                try:
+                    # 전체 리스트를 파싱
+                    list_match = re.search(r'\[[^\]]+\]', response_text)
+                    if list_match:
+                        evidence_tokens = ast.literal_eval(list_match.group())
+                        if isinstance(evidence_tokens, list):
+                            # 실제 토큰 리스트에서 인덱스 찾기
+                            indices = []
+                            for token in evidence_tokens:
+                                if token in tokens:
+                                    # 토큰의 모든 인덱스 찾기
+                                    for i, t in enumerate(tokens):
+                                        if t == token:
+                                            indices.append(i)
+                            
+                            # 중복 제거 및 정렬
+                            indices = sorted(list(set(indices)))
+                            return indices, evidence_tokens
+                except:
+                    pass
+            
+            # 대안: 따옴표로 둘러싸인 토큰들 추출
+            quoted_tokens = re.findall(r'["\']([^"\']+)["\']', response_text)
+            if quoted_tokens:
+                evidence_tokens = quoted_tokens
+                # 실제 토큰 리스트에서 인덱스 찾기
+                indices = []
+                for token in evidence_tokens:
+                    if token in tokens:
+                        # 토큰의 모든 인덱스 찾기
+                        for i, t in enumerate(tokens):
+                            if t == token:
+                                indices.append(i)
+                
+                # 중복 제거 및 정렬
+                indices = sorted(list(set(indices)))
+                return indices, evidence_tokens
+            
+            # 마지막 대안: 공백으로 구분된 단어들 추출
+            words = re.findall(r'\b\w+\b', response_text)
+            evidence_tokens = [word for word in words if word in tokens]
+            if evidence_tokens:
+                indices = []
+                for token in evidence_tokens:
+                    if token in tokens:
+                        for i, t in enumerate(tokens):
+                            if t == token:
+                                indices.append(i)
+                
+                indices = sorted(list(set(indices)))
+                return indices, evidence_tokens
+            
+            return [], []
+        else:
+            print(f"Ollama API 오류: {response.status_code}")
+            return [], []
+            
+    except Exception as e:
+        print(f"Evidence 추출 중 오류: {str(e)}")
+        return [], [] 

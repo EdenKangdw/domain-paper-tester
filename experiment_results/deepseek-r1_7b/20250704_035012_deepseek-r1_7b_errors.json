@@ -1,0 +1,278 @@
+[
+  {
+    "domain": "technical",
+    "prompt_index": 61,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:38:57.483998"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 94,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:07.556324"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 104,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:10.762236"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 138,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:21.518539"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 163,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:29.900149"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 164,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:30.219850"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 187,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:37.796936"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 192,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:39.289428"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 205,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:43.198954"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 226,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:49.651187"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 231,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:39:51.185107"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 278,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:05.606173"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 317,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:17.458576"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 334,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:23.190636"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 342,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:26.077346"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 344,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:26.678582"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 349,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:28.197003"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 353,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:29.514259"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 384,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:39.290572"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 395,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:42.560287"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 401,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:44.068892"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 414,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:47.273496"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 450,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:40:56.471206"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 482,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:41:04.705728"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 501,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:41:09.699147"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 535,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:41:17.940091"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 565,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:41:26.679822"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 572,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:41:28.625776"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 602,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:41:36.638203"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 708,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:06.947963"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 755,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:21.166334"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 782,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:30.484578"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 789,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:32.647890"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 811,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:39.388507"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 815,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:40.601172"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 821,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:42.598253"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 824,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:43.527288"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 839,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:48.036490"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 845,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:49.760638"
+  },
+  {
+    "domain": "technical",
+    "prompt_index": 865,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:42:56.027928"
+  },
+  {
+    "domain": "legal",
+    "prompt_index": 51,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:43:28.487597"
+  },
+  {
+    "domain": "legal",
+    "prompt_index": 132,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:43:53.257138"
+  },
+  {
+    "domain": "legal",
+    "prompt_index": 217,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:44:19.453789"
+  },
+  {
+    "domain": "medical",
+    "prompt_index": 53,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:48:35.620352"
+  },
+  {
+    "domain": "medical",
+    "prompt_index": 173,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:49:13.453837"
+  },
+  {
+    "domain": "medical",
+    "prompt_index": 336,
+    "error": "'<' not supported between instances of 'list' and 'int'",
+    "timestamp": "2025-07-04T03:50:04.462993"
+  }
+]

@@ -121,4 +121,54 @@ HUGGINGFACE_TOKEN=hf_your_actual_token_here
 
 3. python-dotenv가 자동으로 .env 파일을 읽어 환경변수로 등록합니다.
 
-4. Llama-2 등 gated 모델을 사용할 경우, Hugging Face에서 모델 접근 승인을 받아야 합니다. 
+4. Llama-2 등 gated 모델을 사용할 경우, Hugging Face에서 모델 접근 승인을 받아야 합니다.
+
+## 🛠️ 개발 가이드라인
+
+### 페이지 개발 규칙
+
+1. **st.rerun() 사용 금지**
+   - 페이지 새로고침을 방지하여 부드러운 사용자 경험 제공
+   - 대신 세션 상태 관리를 활용한 상태 업데이트
+
+2. **모든 버튼에 고유한 key 지정**
+   ```python
+   if st.button("버튼", key="unique_button_key"):
+       # 버튼 로직
+   ```
+
+3. **세션 상태 활용**
+   - 페이지 상태 유지 및 부드러운 전환
+   - 캐시를 통한 성능 최적화
+
+4. **캐시 초기화 버튼 포함**
+   - 모든 페이지에 디버깅용 캐시 초기화 버튼 추가
+   - 고유한 key로 충돌 방지
+
+### 새 페이지 생성 방법
+
+1. `page_template.py` 파일을 참고하여 새 페이지 생성
+2. `show()` 함수를 구현
+3. 위의 개발 규칙 준수
+4. `tabs/` 디렉토리에 추가
+
+### 예시 코드
+
+```python
+def show():
+    # 세션 상태 초기화
+    if 'page_initialized' not in st.session_state:
+        st.session_state.page_initialized = True
+    
+    st.title("페이지 제목")
+    
+    # 버튼에 고유한 key 지정
+    if st.button("액션", key="action_btn"):
+        # st.rerun() 사용 금지
+        st.success("완료!")
+    
+    # 캐시 초기화 버튼
+    if st.sidebar.button("🗑️ 캐시 초기화", key="clear_cache_page"):
+        # 캐시 초기화 로직
+        st.sidebar.success("초기화 완료!")
+``` 

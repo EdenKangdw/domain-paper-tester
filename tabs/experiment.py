@@ -191,28 +191,45 @@ def load_model_to_session(model_name):
     """
     from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
     import torch
+    import os
+    
+    # Qwen 모델의 경우에만 특별한 환경 변수 설정
+    if 'qwen' in model_name.lower():
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+        os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+        # scaled_dot_product_attention 비활성화 (Qwen 모델만)
+        os.environ["PYTORCH_DISABLE_SCALED_DOT_PRODUCT_ATTENTION"] = "1"
+    # 기본 모델명 추출 (파라미터 수 무시)
+    base_model = model_name.split(":")[0]
+    
     model_map = {
-        'mistral:7b': 'mistralai/Mistral-7B-v0.1',
-        'llama2:7b': 'meta-llama/Llama-2-7b-hf',
-        'gemma:7b': 'google/gemma-7b',
-        'gemma:2b': 'google/gemma-2b',
-        'qwen:7b': 'Qwen/Qwen-7B',
-        'qwen:14b': 'Qwen/Qwen-14B',
-        'deepseek:7b': 'deepseek-ai/deepseek-llm-7b-base',
-        'yi:6b': '01-ai/Yi-6B',
-        'yi:34b': '01-ai/Yi-34B',
-        'openchat:7b': 'openchat/openchat-3.5-7b',
-        'neural:7b': 'microsoft/DialoGPT-medium',
-        'phi:2.7b': 'microsoft/phi-2',
-        'stable:7b': 'stabilityai/stablelm-base-alpha-7b',
+        'mistral': 'mistralai/Mistral-7B-v0.1',
+        'llama2': 'meta-llama/Llama-2-7b-hf',
+        'gemma': 'google/gemma-7b',
+        'qwen': 'Qwen/Qwen-7B',
+        'deepseek': 'deepseek-ai/deepseek-llm-7b-base',
+        'deepseek-r1': 'deepseek-ai/deepseek-llm-7b-base',
+        'deepseek-r1-distill-llama': 'deepseek-ai/DeepSeek-R1-Distill-Llama-8B',
+        'yi': '01-ai/Yi-6B',
+        'openchat': 'openchat/openchat-3.5-7b',
+        'neural': 'microsoft/DialoGPT-medium',
+        'phi': 'microsoft/phi-2',
+        'stable': 'stabilityai/stablelm-base-alpha-7b',
     }
+    
+    # 1. 전체 모델명으로 먼저 시도
     hf_model = model_map.get(model_name)
     if not hf_model:
-        st.error("지원하지 않는 모델명입니다.")
+        # 2. 기본 모델명으로 시도 (파라미터 수 무시)
+        hf_model = model_map.get(base_model)
+    
+    if not hf_model:
+        st.error(f"지원하지 않는 모델명입니다: {model_name} (기본 모델명: {base_model})")
+        st.info(f"지원되는 모델들: {', '.join(model_map.keys())}")
         return False
     try:
         # 모델과 토크나이저를 서버 메모리에 로드
-        tokenizer = AutoTokenizer.from_pretrained(hf_model)
+        tokenizer = AutoTokenizer.from_pretrained(hf_model, trust_remote_code=True)
         
         # 모델별 특별한 토크나이저 설정
         if 'gemma' in model_name.lower():
@@ -225,23 +242,58 @@ def load_model_to_session(model_name):
             tokenizer.pad_token = tokenizer.eos_token
             tokenizer.padding_side = "right"
         
+        # Qwen 모델의 경우 attention 구현을 강제로 eager로 설정
+        if 'qwen' in model_name.lower():
+            import os
+            os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+            # Qwen 모델의 config를 수정하여 eager attention 사용
+            from transformers import AutoConfig
+            config = AutoConfig.from_pretrained(hf_model, trust_remote_code=True)
+            config.attn_implementation = "eager"
+            config.use_flash_attention_2 = False
+            config.use_cache = True
+        
         # 모델 로딩 시도
         try:
             quant_config = BitsAndBytesConfig(load_in_8bit=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                hf_model,
-                quantization_config=quant_config,
-                device_map="auto",
-                torch_dtype=torch.float16
-            )
+            if 'qwen' in model_name.lower():
+                # Qwen 모델의 경우 config를 사용하여 로드
+                model = AutoModelForCausalLM.from_pretrained(
+                    hf_model,
+                    config=config,
+                    quantization_config=quant_config,
+                    device_map="auto",
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    hf_model,
+                    quantization_config=quant_config,
+                    device_map="auto",
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                    attn_implementation="eager"
+                )
         except Exception as quant_error:
             # 8비트 양자화 실패 시 16비트로 시도
             st.warning("8비트 양자화 로딩 실패, 16비트로 시도합니다...")
-            model = AutoModelForCausalLM.from_pretrained(
-                hf_model,
-                device_map="auto",
-                torch_dtype=torch.float16
-            )
+            if 'qwen' in model_name.lower():
+                model = AutoModelForCausalLM.from_pretrained(
+                    hf_model,
+                    config=config,
+                    device_map="auto",
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True
+                )
+            else:
+                model = AutoModelForCausalLM.from_pretrained(
+                    hf_model,
+                    device_map="auto",
+                    torch_dtype=torch.float16,
+                    trust_remote_code=True,
+                    attn_implementation="eager"
+                )
         
         # 세션 상태와 글로벌 캐시에 참조 저장
         st.session_state['model'] = model
@@ -406,47 +458,87 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
     """
     여러 도메인에 대해 evidence 어텐션 실험을 일괄 수행하고 통계 집계
     model_name: 사용할 모델명
-    files: get_dataset_files() 결과
+    files: {domain: filename} 형태의 선택된 파일들
     num_prompts: 도메인별 샘플링할 프롬프트 개수
     """
+    import time
+    from datetime import datetime, timedelta
+    
     results = []
+    error_logs = []  # 에러 로그 저장용
     
     # 서버 메모리에 로드된 모델이 있는지 확인
     if 'model' in st.session_state and 'tokenizer' in st.session_state:
         model = st.session_state['model']
         tokenizer = st.session_state['tokenizer']
-        model_loaded_in_session = True
+        
+        # 모델과 토크나이저가 실제로 None이 아닌지 확인
+        if model is None or tokenizer is None:
+            st.error("모델 또는 토크나이저가 None입니다. 모델을 다시 로드해주세요.")
+            return results
     else:
         st.error("모델이 세션에 로드되어 있지 않습니다. 실험을 진행하려면 먼저 모델을 로드해주세요.")
         return results
 
-    for domain, file_list in files.items():
-        if not file_list:
+    # 전체 작업량 계산
+    total_tasks = len(files) * num_prompts
+    completed_tasks = 0
+    start_time = time.time()
+    
+    # 진행 상황 표시
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # 도메인별 진행 상황 추적
+    domain_progress = {}
+    for domain in files.keys():
+        domain_progress[domain] = 0
+    
+    for domain, selected_file in files.items():
+        if not selected_file:
             continue
-        selected_file = file_list[0]  # 각 도메인 첫 번째 파일 사용(확장 가능)
-        # 모델별 데이터셋에서 프롬프트 가져오기
+        
+        # 모델별 데이터셋에서 프롬프트 가져오기 (최대 10000개)
         prompts = get_model_prompts(model_name, domain, selected_file, max_count=10000)
         if not prompts:
             continue
+        
         # 프롬프트 샘플링
         sampled = prompts[:num_prompts]
+        
         # 모델별 데이터셋 경로 사용
         path = os.path.join(get_model_dataset_path(model_name), domain, selected_file)
-        with open(path, "r") as f:
-            lines = f.readlines()
-        for prompt in sampled:
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+        except Exception as e:
+            continue
+            
+        domain_results = 0
+        for i, prompt in enumerate(sampled):
             try:
                 idx = prompts.index(prompt)
                 data = json.loads(lines[idx])
                 evidence_indices = data.get("evidence_indices", [])
+                
                 # 어텐션 추출
                 inputs = tokenizer(prompt, return_tensors="pt")
                 inputs = {k: v.to(model.device) for k, v in inputs.items()}
                 with torch.no_grad():
-                    outputs = model(**inputs, output_attentions=True)
-                attentions = tuple(attn.cpu().numpy() for attn in outputs.attentions)
+                    try:
+                        outputs = model(**inputs, output_attentions=True)
+                        attentions = tuple(attn.cpu().numpy() for attn in outputs.attentions)
+                    except Exception as attn_error:
+                        continue
                 tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
-                evidence_indices = [i for i in evidence_indices if i < len(tokens)]
+                
+                # evidence_indices 타입 확인 및 안전한 처리
+                if isinstance(evidence_indices, list):
+                    evidence_indices = [i for i in evidence_indices if isinstance(i, (int, float)) and i < len(tokens)]
+                else:
+                    # evidence_indices가 리스트가 아닌 경우 빈 리스트로 초기화
+                    evidence_indices = []
+                
                 last_attn = attentions[-1][0]  # (head, from_token, to_token)
                 # 헤드별 evidence 어텐션 평균
                 head_count = last_attn.shape[0]
@@ -471,9 +563,76 @@ def batch_domain_experiment(model_name, files, num_prompts=5):
                     "model_name": model_name,
                     "tokenizer_name": tokenizer.name_or_path if hasattr(tokenizer, 'name_or_path') else "unknown"
                 })
+                domain_results += 1
+                domain_progress[domain] = domain_results
+                completed_tasks += 1
+                
+                # 진행 상황 업데이트
+                elapsed_time = time.time() - start_time
+                if completed_tasks > 0:
+                    avg_time_per_task = elapsed_time / completed_tasks
+                    remaining_tasks = total_tasks - completed_tasks
+                    estimated_remaining_time = remaining_tasks * avg_time_per_task
+                    
+                    # 시간 포맷팅
+                    elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+                    remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
+                    
+                    # 프로그레스바와 상태 정보 업데이트
+                    progress_bar.progress(completed_tasks / total_tasks)
+                    
+                    # 모든 도메인의 진행 상황 표시
+                    progress_info = []
+                    for d, progress in domain_progress.items():
+                        progress_info.append(f"{d}: {progress}/{num_prompts}")
+                    
+                    status_text.write(f"**소요시간: {elapsed_str} / 남은 시간: {remaining_str}**  \n**{' | '.join(progress_info)}**")
+                
             except Exception as e:
+                completed_tasks += 1
+                # 에러 로그 저장
+                error_log = {
+                    "domain": domain,
+                    "prompt_index": i+1,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
+                error_logs.append(error_log)
+                
+                # 에러 로그를 상태 텍스트에 추가
+                elapsed_time = time.time() - start_time
+                if completed_tasks > 0:
+                    avg_time_per_task = elapsed_time / completed_tasks
+                    remaining_tasks = total_tasks - completed_tasks
+                    estimated_remaining_time = remaining_tasks * avg_time_per_task
+                    elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+                    remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
+                else:
+                    elapsed_str = "0:00:00"
+                    remaining_str = "0:00:00"
+                
+                error_msg = f"❌ {domain} 도메인 {i+1}번째 프롬프트 처리 실패: {str(e)}"
+                
+                # 모든 도메인의 진행 상황 표시
+                progress_info = []
+                for d, progress in domain_progress.items():
+                    progress_info.append(f"{d}: {progress}/{num_prompts}")
+                
+                status_text.write(f"**소요시간: {elapsed_str} / 남은 시간: {remaining_str}**  \n**{' | '.join(progress_info)}**  \n{error_msg}")
                 continue
 
+    # 에러 로그가 있으면 파일에 저장
+    if error_logs:
+        experiment_path = get_model_experiment_path(model_name)
+        os.makedirs(experiment_path, exist_ok=True)
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        error_log_file = f"{experiment_path}/{now}_{model_name.replace(':','_')}_errors.json"
+        with open(error_log_file, "w", encoding="utf-8") as f:
+            json.dump(error_logs, f, ensure_ascii=False, indent=2)
+        
+        # 에러 개수 표시
+        status_text.write(f"✅ 실험 완료! 총 {len(results)}개 결과, {len(error_logs)}개 에러 발생  \n에러 로그: {error_log_file}")
+    
     return results
 
 def save_experiment_result(results, model_name):
@@ -575,280 +734,175 @@ def check_model_loaded():
 
 def show():
     # 페이지 로드 시 자동으로 모델 상태 복구 시도
-    if 'model_auto_restored' not in st.session_state:
-        st.session_state['model_auto_restored'] = True
-        # 자동 복구 시도 (조용히)
-        try:
-            is_loaded, loaded_model_name = check_model_loaded()
-            if is_loaded:
-                st.session_state['auto_restored_model'] = loaded_model_name
-        except Exception:
-            pass
+    if 'model_loaded' not in st.session_state:
+        st.session_state.model_loaded = False
+    if 'current_model_name' not in st.session_state:
+        st.session_state.current_model_name = None
+    if 'dataset_files_cache' not in st.session_state:
+        st.session_state.dataset_files_cache = {}
+    if 'model_dataset_files_cache' not in st.session_state:
+        st.session_state.model_dataset_files_cache = {}
     
-    st.title("실험 탭")
-    st.write("실험 탭입니다. (어텐션 히트맵 및 evidence 분석 기능이 여기에 추가됨)")
-
-    # 자동 복구된 모델이 있으면 알림
-    if 'auto_restored_model' in st.session_state:
-        st.success(f"이전에 로드된 {st.session_state['auto_restored_model']} 모델이 자동으로 복구되었습니다.")
-        del st.session_state['auto_restored_model']
-
-    st.markdown("---")
-    st.subheader(":rocket: huggingface 모델 로드/해제")
+    st.title("🔬 Attention Pattern Experiment")
     
-    # 모델 로드 상태 확인
-    is_loaded, loaded_model_name = check_model_loaded()
-    if is_loaded:
-        st.success(f"현재 {loaded_model_name} 모델이 서버 메모리에 로드되어 있습니다.")
+    # 모델 선택 섹션
+    st.subheader("🤖 Model Selection")
     
-    # Hugging Face 모델 목록 (실험용)
-    hf_model_list = [
-        "mistral:7b",
-        "llama2:7b", 
-        "gemma:7b",
-        "gemma:2b",
-        "qwen:7b",
-        "qwen:14b",
-        "deepseek:7b",
-        "yi:6b",
-        "yi:34b",
-        "openchat:7b",
-        "neural:7b",
-        "phi:2.7b",
-        "stable:7b"
-    ]
+    # 모델 목록 (캐시됨)
+    available_models = get_available_models()
     
-    # Ollama 모델 목록 (참고용)
-    ollama_model_list = get_available_models()
+    if not available_models:
+        st.error("사용 가능한 모델이 없습니다. Model Load 탭에서 모델을 설치해주세요.")
+        return
     
-    # 모델 선택 방식
-    model_selection_method = st.radio(
-        "모델 선택 방식",
-        ["Hugging Face 모델 (실험용)", "Ollama 모델 (참고용)", "직접 입력"],
-        horizontal=True,
-        key="model_selection_method"
+    selected_model = st.selectbox(
+        "실험할 모델을 선택하세요",
+        available_models,
+        key="experiment_model_selector"
     )
     
-    if model_selection_method == "Hugging Face 모델 (실험용)":
-        selected_model = st.selectbox(
-            "사용할 Hugging Face 모델을 선택하세요", 
-            hf_model_list, 
-            key="hf_model_select"
-        )
-        st.info("💡 Hugging Face 모델은 어텐션 실험에 사용됩니다.")
-        
-    elif model_selection_method == "Ollama 모델 (참고용)":
-        if ollama_model_list:
-            selected_model = st.selectbox(
-                "설치된 Ollama 모델 목록 (참고용)", 
-                ollama_model_list, 
-                key="ollama_model_select"
-            )
-            st.warning("⚠️ Ollama 모델은 어텐션 실험을 지원하지 않습니다. Hugging Face 모델을 사용해주세요.")
-        else:
-            selected_model = st.text_input("설치된 Ollama 모델이 없습니다. 직접 입력하세요", key="ollama_model_input")
-            st.warning("⚠️ Ollama 모델은 어텐션 실험을 지원하지 않습니다.")
-    else:
-        selected_model = st.text_input("모델명을 직접 입력하세요 (예: mistral:7b)", key="custom_model_input")
-        st.info("💡 지원되는 모델: mistral:7b, llama2:7b, gemma:7b, qwen:7b 등")
-
-    col1, col2 = st.columns(2)
+    # 모델 로드/언로드 버튼
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        if st.button("모델 로드"):
-            if is_loaded:
-                st.warning(f"이미 {loaded_model_name} 모델이 로드되어 있습니다. 다른 모델을 로드하려면 먼저 현재 모델을 해제해주세요.")
+        if st.button("📥 모델 로드", type="primary", key="load_model_btn"):
+            if selected_model != st.session_state.current_model_name:
+                # 다른 모델을 로드하는 경우
+                if st.session_state.model_loaded:
+                    unload_model_from_session()
+                
+                with st.spinner(f"{selected_model} 모델을 로드하는 중..."):
+                    success = load_model_to_session(selected_model)
+                    if success:
+                        st.session_state.model_loaded = True
+                        st.session_state.current_model_name = selected_model
+                        st.success(f"✅ {selected_model} 모델이 로드되었습니다!")
+                    else:
+                        st.error(f"❌ {selected_model} 모델 로드에 실패했습니다.")
             else:
-                if load_model_to_session(selected_model):
-                    st.success(f"모델 {selected_model}이(가) 서버 메모리에 로드되었습니다.")
-                    st.rerun()  # 페이지 새로고침하여 상태 업데이트
+                st.info("이미 로드된 모델입니다.")
+    
     with col2:
-        if st.button("모델 해제"):
-            if not is_loaded:
-                st.warning("로드된 모델이 없습니다.")
-            else:
+        if st.button("📤 모델 언로드", type="secondary", key="unload_model_btn"):
+            if st.session_state.model_loaded:
                 unload_model_from_session()
-                st.rerun()  # 페이지 새로고침하여 상태 업데이트
-
-    # 모델이 로드되어 있으면 실험 UI
-    if is_loaded:
-        st.markdown("---")
-        st.subheader(":gear: 모델별 실험 설정")
-        
-        # 모델별 데이터셋 준비
-        with st.expander("📁 모델별 데이터셋 준비", expanded=False):
-            st.markdown("""
-            **모델별 실험을 위해 데이터셋을 준비합니다:**
-            - 각 모델마다 별도의 데이터셋 디렉토리가 생성됩니다.
-            - 원본 데이터셋이 모델별 디렉토리로 복사됩니다.
-            - 모델별로 독립적인 실험 환경을 구성할 수 있습니다.
-            """)
-            
-            if st.button("현재 모델용 데이터셋 준비"):
-                with st.spinner(f"{loaded_model_name} 모델용 데이터셋을 준비하는 중..."):
-                    if copy_original_dataset_to_model(loaded_model_name):
-                        st.success(f"{loaded_model_name} 모델용 데이터셋이 준비되었습니다.")
-                        st.rerun()
-        
-        # 모델별 데이터셋 확인
-        model_dataset_files = get_model_dataset_files(loaded_model_name)
-        has_model_dataset = any(files for files in model_dataset_files.values())
-        
-        if has_model_dataset:
-            st.success(f"✅ {loaded_model_name} 모델용 데이터셋이 준비되어 있습니다.")
-            
-            # 모델별 실험 UI
-            st.markdown("---")
-            st.subheader(":microscope: 모델별 실험")
-            
-            domains = list(model_dataset_files.keys())
-            selected_domain = st.selectbox("도메인 선택", domains, key="model_domain")
-            dataset_files = model_dataset_files[selected_domain]
-            
-            if dataset_files:
-                selected_file = st.selectbox("데이터셋 파일 선택", dataset_files, key="model_file")
-                prompts = get_model_prompts(loaded_model_name, selected_domain, selected_file)
-                
-                if prompts:
-                    selected_prompt = st.selectbox("프롬프트 선택 (최대 100개 미리보기)", prompts, key="model_prompt")
-                    prompt_idx = prompts.index(selected_prompt)
-                    path = os.path.join(get_model_dataset_path(loaded_model_name), selected_domain, selected_file)
-                    
-                    # 선택된 프롬프트의 전체 데이터 로드
-                    try:
-                        with open(path, "r") as f:
-                            for i, line in enumerate(f):
-                                if i == prompt_idx:
-                                    data = json.loads(line)
-                                    # 전체 데이터를 보기 좋게 표시
-                                    st.markdown("### 📝 선택된 데이터셋 상세 정보")
-                                    st.markdown("**프롬프트:**")
-                                    st.markdown(f"```\n{data.get('prompt', '')}\n```")
-                                    
-                                    st.markdown("### 🔍 Evidence 정보")
-                                    evidence_tokens = data.get("evidence_tokens", [])
-                                    evidence_indices = data.get("evidence_indices", [])
-                                    
-                                    # Evidence 토큰과 인덱스를 테이블로 표시
-                                    evidence_data = []
-                                    for idx, token in zip(evidence_indices, evidence_tokens):
-                                        evidence_data.append({
-                                            "인덱스": idx,
-                                            "토큰": token
-                                        })
-                                    if evidence_data:
-                                        st.table(pd.DataFrame(evidence_data))
-                                    else:
-                                        st.warning("Evidence 정보가 없습니다.")
-                                    
-                                    # 메타데이터 표시
-                                    st.markdown("### 📊 메타데이터")
-                                    meta_data = {
-                                        "도메인": data.get("domain", ""),
-                                        "모델": data.get("model", ""),
-                                        "타임스탬프": data.get("timestamp", ""),
-                                        "인덱스": data.get("index", "")
-                                    }
-                                    st.json(meta_data)
-                                    break
-                    except Exception as e:
-                        st.error(f"데이터셋 파일을 읽는 중 오류가 발생했습니다: {str(e)}")
-                    
-                    st.markdown("---")
-                    st.subheader("어텐션 실험")
-                    if st.button("어텐션 추출 및 토큰화 보기"):
-                        with st.spinner("모델에서 어텐션 추출 중..."):
-                            attentions, tokens, token_ids = get_attention_from_session(selected_prompt)
-                        if attentions is None:
-                            st.error("해당 모델은 지원되지 않거나 로드에 실패했습니다.")
-                        else:
-                            st.markdown(f"**토큰화 결과:** {' | '.join(tokens)}")
-                            evidence_set = set(evidence_tokens)
-                            colored = []
-                            for t in tokens:
-                                if t in evidence_set:
-                                    colored.append(f"<span style='background-color: #ffe066'>{t}</span>")
-                                else:
-                                    colored.append(t)
-                            st.markdown("**evidence 토큰 강조:**<br>" + ' '.join(colored), unsafe_allow_html=True)
-                            st.info(f"어텐션 shape: {len(attentions)} layers, {attentions[-1].shape[1]} heads, {attentions[-1].shape[2]} tokens")
-                            last_attn = attentions[-1][0]
-                            fig, avg_evidence_attention = plot_attention_head_heatmap(last_attn, tokens, evidence_indices)
-                            st.pyplot(fig)
-                            max_head = int(np.argmax(avg_evidence_attention))
-                            st.success(f"가장 evidence에 강하게 반응하는 헤드: Head {max_head} (평균 어텐션 {avg_evidence_attention[max_head]:.4f})")
-                            fig2, avg_attn = plot_attention_head_token_heatmap(last_attn, tokens, evidence_indices)
-                            st.markdown("---")
-                            st.subheader("헤드별 토큰 어텐션 히트맵")
-                            st.pyplot(fig2)
-                            st.caption("* x축: 토큰 인덱스 (evidence 토큰은 빨간색), y축: 헤드 인덱스, 값: 어텐션 평균 *")
-                            st.markdown("---")
-                            st.subheader("토큰별 헤드 어텐션 히트맵")
-                            fig3, avg_attn_t = plot_token_head_attention_heatmap(last_attn, tokens, evidence_indices)
-                            st.pyplot(fig3)
-                            st.caption("* y축: 토큰 인덱스(문자열, evidence 토큰은 빨간색), x축: 헤드 인덱스, 값: 어텐션 평균 *")
-                else:
-                    st.warning("해당 파일에서 프롬프트를 불러올 수 없습니다.")
+                st.session_state.model_loaded = False
+                st.session_state.current_model_name = None
+                st.success("✅ 모델이 언로드되었습니다!")
             else:
-                st.warning(f"{selected_domain} 도메인에 데이터셋 파일이 없습니다.")
-        else:
-            st.warning(f"⚠️ {loaded_model_name} 모델용 데이터셋이 준비되지 않았습니다. 위의 '모델별 데이터셋 준비' 버튼을 클릭하여 데이터셋을 준비해주세요.")
-
-        # 일괄 실험 섹션 추가
-        st.markdown("---")
-        st.subheader(":rocket: 모델별 일괄 실험")
-        
-        if has_model_dataset:
-            # 실험 설정
-            num_prompts = st.number_input("도메인별 프롬프트 수", min_value=1, max_value=10000, value=5)
-            
-            # 실험 시작 버튼
-            if st.button("모델별 실험 시작"):
-                st.info("실험을 시작합니다. 이 작업은 시간이 오래 걸릴 수 있습니다.")
-                
-                # 실험 실행
-                try:
-                    with st.spinner("실험을 실행하는 중입니다..."):
-                        # 전체 도메인에 대해 실험 실행
-                        all_results = []
-                        total_domains = len([d for d, files in model_dataset_files.items() if files])
-                        current_domain = 0
-                        
-                        for domain, file_list in model_dataset_files.items():
-                            if not file_list:
-                                continue
-                            
-                            current_domain += 1
-                            st.text(f"진행 중: {domain} 도메인 ({current_domain}/{total_domains})")
-                            
-                            results = batch_domain_experiment(loaded_model_name, {domain: file_list}, num_prompts)
-                            all_results.extend(results)
-                        
-                        # 실험 결과 저장
-                        if all_results:
-                            filename = save_experiment_result(all_results, loaded_model_name)
-                            st.success(f"✅ 실험이 완료되었습니다!")
-                            st.success(f"📁 결과가 저장되었습니다: {filename}")
-                            st.info(f"📊 총 {len(all_results)}개의 실험 결과가 생성되었습니다.")
-                            
-                            # 결과 미리보기
-                            st.markdown("### 📋 실험 결과 미리보기")
-                            preview_data = []
-                            for result in all_results[:5]:  # 처음 5개만 표시
-                                preview_data.append({
-                                    "도메인": result["domain"],
-                                    "최대 어텐션 헤드": result["max_head"],
-                                    "평균 어텐션": f"{result['avg_evidence_attention']:.4f}",
-                                    "Evidence 토큰 수": len(result["evidence_indices"])
-                                })
-                            if preview_data:
-                                st.table(pd.DataFrame(preview_data))
-                        else:
-                            st.warning("실험 결과가 생성되지 않았습니다.")
-                            
-                except Exception as e:
-                    st.error(f"실험 중 오류가 발생했습니다: {str(e)}")
-                    st.error("모델이 제대로 로드되어 있는지 확인해주세요.")
-        else:
-            st.warning("모델별 데이터셋이 준비되지 않아 일괄 실험을 수행할 수 없습니다.")
+                st.info("로드된 모델이 없습니다.")
+    
+    with col3:
+        if st.button("🔄 모델 목록 새로고침", type="secondary", key="refresh_models_btn"):
+            get_available_models.clear()
+            st.success("모델 목록이 새로고침되었습니다!")
+    
+    # 현재 모델 상태 표시
+    if st.session_state.model_loaded:
+        st.success(f"✅ 현재 로드된 모델: {st.session_state.current_model_name}")
     else:
-        st.warning("모델이 로드되어 있지 않습니다. 실험을 진행하려면 먼저 모델을 로드해주세요.")
+        st.warning("⚠️ 모델이 로드되지 않았습니다.")
+    
+    # 데이터셋 선택 섹션
+    st.subheader("📊 Dataset Selection")
+    
+    # 데이터셋 파일 목록 (캐시된 경우 사용)
+    cache_key = f"dataset_files_{selected_model}"
+    if cache_key not in st.session_state.dataset_files_cache:
+        st.session_state.dataset_files_cache[cache_key] = get_model_dataset_files(selected_model)
+    
+    dataset_files = st.session_state.dataset_files_cache[cache_key]
+    
+    # 도메인별 데이터셋 파일 선택
+    domains = ["general", "technical", "legal", "medical"]
+    selected_files = {}
+    
+    for domain in domains:
+        files = dataset_files.get(domain, [])
+        if files:
+            selected_file = st.selectbox(
+                f"{domain.capitalize()} 도메인 데이터셋",
+                files,
+                key=f"file_selector_{domain}"
+            )
+            selected_files[domain] = selected_file
+        else:
+            st.warning(f"{domain.capitalize()} 도메인에 데이터셋 파일이 없습니다.")
+    
+    # 실험 설정
+    st.subheader("⚙️ Experiment Settings")
+    
+    col4, col5 = st.columns(2)
+    
+    with col4:
+        num_prompts = st.number_input(
+            "실험할 프롬프트 수",
+            min_value=1,
+            max_value=10000,
+            value=5,
+            help="각 도메인별로 실험할 프롬프트의 개수 (최대 10000개)"
+        )
+    
+    with col5:
+        batch_mode = st.checkbox(
+            "배치 모드",
+            value=True,
+            help="모든 도메인에 대해 한 번에 실험을 실행합니다."
+        )
+    
+    # 실험 실행 버튼
+    if st.button("🚀 실험 시작", type="primary", key="start_experiment_btn"):
+        if not st.session_state.model_loaded:
+            st.error("모델을 먼저 로드해주세요.")
+            return
+        
+        if not selected_files:
+            st.error("실험할 데이터셋 파일을 선택해주세요.")
+            return
+        
+        # 실험 실행
+        try:
+            if batch_mode:
+                results = batch_domain_experiment(selected_model, selected_files, num_prompts)
+                if results:
+                    save_experiment_result(results, selected_model)
+                    st.success(f"✅ 실험 완료! 총 {len(results)}개 결과")
+                else:
+                    st.warning("⚠️ 실험 결과가 없습니다.")
+            else:
+                st.info("단일 도메인 실험 모드는 준비 중입니다.")
+        except Exception as e:
+            st.error(f"❌ 실험 실행 중 오류 발생: {str(e)}")
+    
+    # 실험 결과 확인
+    st.subheader("📋 Experiment Results")
+    
+    # 실험 결과 파일 목록
+    experiment_results = list_model_experiment_results(selected_model)
+    
+    if experiment_results:
+        selected_result = st.selectbox(
+            "확인할 실험 결과를 선택하세요",
+            experiment_results,
+            key="result_selector"
+        )
+        
+        if selected_result:
+            result_data = load_model_experiment_result(selected_model, selected_result)
+            if result_data:
+                st.json(result_data)
+    else:
+        st.info("아직 실험 결과가 없습니다.")
+    
+    # 캐시 초기화 버튼 (디버깅용)
+    if st.sidebar.button("🗑️ 캐시 초기화", help="모든 캐시를 초기화합니다", key="clear_cache_experiment"):
+        # 캐시 함수들 초기화
+        get_available_models.clear()
+        # 세션 상태 캐시 초기화
+        keys_to_remove = ['model_loaded', 'current_model_name', 'dataset_files_cache', 
+                         'model_dataset_files_cache', 'available_models']
+        for key in keys_to_remove:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.sidebar.success("캐시가 초기화되었습니다!")
+        # st.rerun() 제거 - 페이지 새로고침 방지

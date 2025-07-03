@@ -2,7 +2,7 @@ import streamlit as st
 from pathlib import Path
 import json
 from transformers import AutoTokenizer
-from utils import check_ollama_model_status, OLLAMA_API_BASE
+from utils import check_ollama_model_status, get_available_models, OLLAMA_API_BASE, get_model_response
 import requests
 import random
 from typing import List, Tuple
@@ -18,13 +18,14 @@ try:
 except ImportError:
     st.warning("python-dotenv가 설치되지 않았습니다. pip install python-dotenv로 설치해주세요.")
 
-# Model tokenizer settings
+# Model tokenizer settings (파라미터 수 무시하고 기본 모델명만 사용)
 MODEL_TOKENIZER_MAP = {
     "llama2": "meta-llama/Llama-2-7b-hf",
-    "gemma:2b": "google/gemma-2b",
-    "gemma:7b": "google/gemma-7b",
+    "gemma": "google/gemma-7b",
     "qwen": "Qwen/Qwen-7B",
     "deepseek": "deepseek-ai/deepseek-coder-7b-base",
+    "deepseek-r1": "deepseek-ai/deepseek-llm-7b-base",
+    "deepseek-r1-distill-llama": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
     "mistral": "mistralai/Mistral-7B-v0.1",
     "mixtral": "mistralai/Mixtral-8x7B-v0.1",
     "yi": "01-ai/Yi-6B",
@@ -34,50 +35,94 @@ MODEL_TOKENIZER_MAP = {
     "stable": "stabilityai/stable-code-3b"
 }
 
+# Origin 프롬프트 캐시
+_origin_prompts_cache = {}
+
+def load_origin_prompts():
+    """Origin 폴더에서 도메인별 프롬프트를 로드합니다."""
+    # 세션 상태에서 캐시 확인
+    if "origin_prompts_cache" in st.session_state:
+        return st.session_state.origin_prompts_cache
+    
+    origin_dir = Path("dataset/origin")
+    if not origin_dir.exists():
+        st.error("dataset/origin 폴더를 찾을 수 없습니다.")
+        return {}
+    
+    prompts_cache = {}
+    
+    for domain in ["general", "legal", "medical", "technical"]:
+        domain_dir = origin_dir / domain
+        prompt_file = domain_dir / f"{domain}_prompts.json"
+        
+        if prompt_file.exists():
+            try:
+                with open(prompt_file, 'r', encoding='utf-8') as f:
+                    prompts_data = json.load(f)
+                    # 프롬프트 텍스트만 추출
+                    prompts = [item["prompt"] for item in prompts_data]
+                    prompts_cache[domain.capitalize()] = prompts
+            except Exception as e:
+                st.error(f"Error loading prompts for {domain}: {str(e)}")
+                prompts_cache[domain.capitalize()] = []
+        else:
+            st.warning(f"Prompt file not found: {prompt_file}")
+            prompts_cache[domain.capitalize()] = []
+    
+    # 세션 상태에 캐시 저장
+    st.session_state.origin_prompts_cache = prompts_cache
+    return prompts_cache
+
+@st.cache_data(ttl=60)  # 60초 캐시로 연장
 def get_running_models():
-    """Get list of currently running Ollama models"""
+    """Get list of currently running Ollama models with caching"""
     try:
-        response = requests.get(f"{OLLAMA_API_BASE}/api/tags")
+        response = requests.get(f"{OLLAMA_API_BASE}/api/tags", timeout=5)
         if response.status_code == 200:
             models = response.json().get("models", [])
             running_models = []
+            
+            # 병렬 처리를 위한 간단한 최적화
             for model in models:
-                if check_ollama_model_status(model["name"]):
-                    running_models.append(model["name"])
+                try:
+                    # 더 빠른 상태 확인 (타임아웃 단축)
+                    if check_ollama_model_status_fast(model["name"]):
+                        running_models.append(model["name"])
+                except:
+                    continue  # 개별 모델 실패 시 건너뛰기
+            
             return running_models
         return []
     except:
         return []
 
-def get_model_response(model_name, prompt):
-    """Get response from the model"""
+def check_ollama_model_status_fast(model_name):
+    """빠른 모델 상태 확인 (타임아웃 단축)"""
     try:
+        # 먼저 실행 중인 모델 목록 확인
+        response = requests.get(f"{OLLAMA_API_BASE}/api/ps", timeout=3)
+        if response.status_code == 200:
+            running_models = response.json().get("models", [])
+            for model in running_models:
+                if model.get("name") == model_name:
+                    return True
+        
+        # 실행 중인 모델 목록에 없으면 직접 테스트
         response = requests.post(
             f"{OLLAMA_API_BASE}/api/generate",
             json={
                 "model": model_name,
-                "prompt": prompt,
+                "prompt": "test",
                 "stream": False
             },
-            timeout=60
+            timeout=5  # 타임아웃을 5초로 연장
         )
-        response.raise_for_status()
-        
-        # 응답이 JSON인 경우
-        try:
-            json_response = response.json()
-            if isinstance(json_response, dict) and "response" in json_response:
-                return json_response["response"]
-        except json.JSONDecodeError:
-            pass
-            
-        # 응답이 바이트인 경우
-        if isinstance(response.content, bytes):
-            return response.content.decode('utf-8')
-            
-        return str(response.text)
+        return response.status_code == 200
     except Exception as e:
-        return f"Error occurred: {str(e)}"
+        print(f"Model status check error for {model_name}: {str(e)}")
+        return False
+
+
 
 def tokenize_and_extract_words(text, tokenizer):
     """텍스트를 토큰화하고 단어를 추출"""
@@ -185,8 +230,33 @@ def format_word_and_token_info(tokens, words, word_to_tokens):
     
     return "\n".join(token_entries), "\n".join(word_entries)
 
+def calculate_evidence_indices(evidence_tokens, all_tokens):
+    """LLM이 추출한 evidence 토큰들의 인덱스를 계산합니다."""
+    evidence_indices = []
+    
+    for evidence_token in evidence_tokens:
+        # 토큰 목록에서 evidence 토큰의 인덱스 찾기
+        found = False
+        for i, token in enumerate(all_tokens):
+            # 정확한 매칭 시도
+            if token == evidence_token:
+                evidence_indices.append(i)
+                found = True
+                break
+            # 부분 매칭 시도 (토큰이 여러 부분으로 나뉜 경우)
+            elif evidence_token in token or token in evidence_token:
+                evidence_indices.append(i)
+                found = True
+                break
+        
+        # 매칭되지 않은 경우 로그 출력
+        if not found:
+            print(f"Warning: Could not find index for evidence token '{evidence_token}' in token list")
+    
+    return evidence_indices
+
 def create_evidence_query(word_list, prompt, domain):
-    """Evidence 추출을 위한 쿼리 생성"""
+    """Evidence 추출을 위한 쿼리 생성 (기존 함수 유지 - 호환성)"""
     # 단어 목록을 줄바꿈으로 분리하고 공백 제거
     words = [word.strip() for word in word_list.split('\n') if word.strip()]
     
@@ -373,41 +443,47 @@ def visualize_evidence(words, evidence_word_index, evidence, explanation):
         st.code(str(json_data), language="json")
 
 def get_test_prompt(domain: str) -> str:
-    """도메인별 테스트 프롬프트를 반환합니다."""
-    prompts = {
-        "Medical": [
-            "What are the main side effects of this medication?",
-            "What are the contraindications for this treatment?",
-            "What are the recommended dosages for this drug?",
-            "What are the potential complications of this procedure?",
-            "What are the warning signs to watch for?"
-        ],
-        "Legal": [
-            "What are the key clauses in this contract?",
-            "What are the main obligations of the parties?",
-            "What are the termination conditions?",
-            "What are the dispute resolution procedures?",
-            "What are the confidentiality requirements?"
-        ],
-        "Technical": [
-            "What is the main functionality of this code?",
-            "What are the key features of this system?",
-            "What are the system requirements?",
-            "What are the performance specifications?",
-            "What are the security measures implemented?"
-        ],
-        "General": [
-            "What is the main content of this document?",
-            "What are the key points discussed?",
-            "What are the main conclusions?",
-            "What are the important findings?",
-            "What are the main recommendations?"
-        ]
-    }
-    return random.choice(prompts.get(domain, ["Please enter your prompt here..."]))
+    """도메인별 테스트 프롬프트를 origin 폴더에서 가져옵니다."""
+    origin_prompts = load_origin_prompts()
+    
+    if domain in origin_prompts and origin_prompts[domain]:
+        return random.choice(origin_prompts[domain])
+    else:
+        # fallback 프롬프트
+        fallback_prompts = {
+            "Medical": [
+                "What are the main side effects of this medication?",
+                "What are the contraindications for this treatment?",
+                "What are the recommended dosages for this drug?",
+                "What are the potential complications of this procedure?",
+                "What are the warning signs to watch for?"
+            ],
+            "Legal": [
+                "What are the key clauses in this contract?",
+                "What are the main obligations of the parties?",
+                "What are the termination conditions?",
+                "What are the dispute resolution procedures?",
+                "What are the confidentiality requirements?"
+            ],
+            "Technical": [
+                "What is the main functionality of this code?",
+                "What are the key features of this system?",
+                "What are the system requirements?",
+                "What are the performance specifications?",
+                "What are the security measures implemented?"
+            ],
+            "General": [
+                "What is the main content of this document?",
+                "What are the key points discussed?",
+                "What are the main conclusions?",
+                "What are the important findings?",
+                "What are the main recommendations?"
+            ]
+        }
+        return random.choice(fallback_prompts.get(domain, ["Please enter your prompt here..."]))
 
-def extract_evidence_with_ollama(prompt, tokens, model_name):
-    """Ollama API를 사용하여 증거 추출"""
+def extract_evidence_with_ollama(prompt, tokens, model_name, domain="general"):
+    """LLM이 evidence 토큰을 추출하고, 코드로 인덱스를 계산합니다."""
     try:
         # 토큰이 바이트 타입인 경우 문자열로 디코딩
         decoded_tokens = []
@@ -423,7 +499,8 @@ def extract_evidence_with_ollama(prompt, tokens, model_name):
             else:
                 decoded_tokens.append(str(token))
 
-        query = create_evidence_query("\n".join(decoded_tokens), prompt, "Medical")
+        # LLM에게 evidence 토큰 추출 요청
+        query = create_evidence_query("\n".join(decoded_tokens), prompt, domain)
         
         response = requests.post(
             "http://localhost:11434/api/generate",
@@ -454,7 +531,7 @@ def extract_evidence_with_ollama(prompt, tokens, model_name):
                     if json_match:
                         response_text = json_match.group(1)
                     else:
-                        st.error("Could not find JSON object in response")
+                        print("Could not find JSON object in response")
                         return [], []
                     
                     # JSON 파싱 시도
@@ -463,105 +540,116 @@ def extract_evidence_with_ollama(prompt, tokens, model_name):
                     # 필드명 정규화
                     evidence_data = {k.lower().replace('_', ''): v for k, v in evidence_data.items()}
                     
-                    # 필수 필드 확인 (정규화된 필드명으로)
-                    indices = evidence_data.get('evidencetokenindex', evidence_data.get('evidenceindices', []))
-                    evidence = evidence_data.get('evidence', [])
+                    # LLM이 추출한 evidence 토큰 가져오기
+                    evidence_tokens = evidence_data.get('evidence', [])
                     
-                    if not indices or not evidence:
-                        st.error("Missing required fields in evidence data")
+                    if not evidence_tokens:
+                        print("No evidence tokens found in LLM response")
                         return [], []
                     
-                    # 문장부호 제거 및 인덱스 조정
-                    punctuation_pattern = re.compile(r'[^\w\s]')
-                    filtered_indices = []
-                    filtered_evidence = []
-                    removed_count = 0
+                    # 코드로 evidence 토큰의 인덱스 계산
+                    evidence_indices = calculate_evidence_indices(evidence_tokens, decoded_tokens)
                     
-                    for i, (idx, token) in enumerate(zip(indices, evidence)):
-                        # 문장부호가 아닌 경우만 포함
-                        if not punctuation_pattern.search(token):
-                            # 이전에 제거된 토큰 수만큼 인덱스 조정
-                            adjusted_idx = idx - removed_count
-                            filtered_indices.append(adjusted_idx)
-                            filtered_evidence.append(token)
-                        else:
-                            removed_count += 1
-                    
-                    indices = filtered_indices
-                    evidence = filtered_evidence
-                    
-                    # 인덱스와 토큰 수가 일치하는지 확인
-                    if len(indices) != len(evidence):
-                        print(f"Debug - Indices length: {len(indices)}, Evidence length: {len(evidence)}")
-                        print(f"Debug - Indices: {indices}")
-                        print(f"Debug - Evidence: {evidence}")
-                        st.error(f"Number of indices ({len(indices)}) and tokens ({len(evidence)}) do not match")
-                        # 길이가 다를 경우 더 짧은 쪽에 맞춰 자르기
-                        min_length = min(len(indices), len(evidence))
-                        indices = indices[:min_length]
-                        evidence = evidence[:min_length]
+                    # 결과 검증
+                    if not evidence_indices:
+                        print(f"Warning: Could not find indices for evidence tokens: {evidence_tokens}")
+                        return [], []
                     
                     # 인덱스가 유효한지 확인
-                    if any(not isinstance(i, int) or i < 0 or i >= len(tokens) for i in indices):
-                        st.error("Invalid indices found in response")
+                    if any(not isinstance(i, int) or i < 0 or i >= len(decoded_tokens) for i in evidence_indices):
+                        print(f"Warning: Invalid indices found: {evidence_indices}")
                         return [], []
                     
-                    return indices, evidence
+                    print(f"LLM extracted {len(evidence_tokens)} evidence tokens: {evidence_tokens}")
+                    print(f"Code calculated indices: {evidence_indices}")
+                    return evidence_indices, evidence_tokens
+                    
                 except json.JSONDecodeError as e:
                     print(f"Error parsing response: {str(e)}\nResponse: {response_text}")
-                    st.error(f"Evidence extraction failed: Invalid JSON format")
                     return [], []
             else:
-                st.error("No response field in API result")
+                print("No response field in API result")
                 return [], []
         else:
-            st.error(f"API request failed with status code: {response.status_code}")
+            print(f"API request failed with status code: {response.status_code}")
             return [], []
     except Exception as e:
-        st.error(f"Error during evidence extraction: {str(e)}")
+        print(f"Error during evidence extraction: {str(e)}")
         return [], []
 
 def load_tokenizer(model_key):
-    """Load tokenizer for the given model"""
+    """Load tokenizer for the given model with caching"""
+    # 세션 상태에서 캐시된 토크나이저 확인
+    cache_key = f"tokenizer_{model_key}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    
     try:
-        # 모델 키에서 기본 모델명 추출 (예: gemma:7b -> gemma)
+        # 모델 키에서 기본 모델명 추출 (예: gemma:7b -> gemma, deepseek-r1:7b -> deepseek-r1)
         base_model = model_key.split(":")[0]
         
+        # 디버깅 정보
+        st.info(f"🔍 모델 키: {model_key}")
+        st.info(f"🔍 기본 모델명: {base_model}")
+        st.info(f"🔍 지원되는 모델들: {list(MODEL_TOKENIZER_MAP.keys())}")
+        
         # MODEL_TOKENIZER_MAP에서 토크나이저 이름 찾기
-        tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)  # 전체 모델명으로 먼저 시도
-        if not tokenizer_name:
-            tokenizer_name = MODEL_TOKENIZER_MAP.get(base_model)  # 기본 모델명으로 시도
+        # 1. 전체 모델명으로 먼저 시도
+        tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
+        st.info(f"🔍 전체 모델명 매칭 시도: {model_key} -> {tokenizer_name}")
+        
+        if tokenizer_name:
+            st.info(f"🔍 전체 모델명 매칭 성공: {model_key}")
+        else:
+            # 2. 기본 모델명으로 시도 (파라미터 수 무시)
+            tokenizer_name = MODEL_TOKENIZER_MAP.get(base_model)
+            st.info(f"🔍 기본 모델명 매칭 시도: {base_model} -> {tokenizer_name}")
+            
+            if tokenizer_name:
+                st.info(f"🔍 기본 모델명 매칭 성공: {base_model}")
+        
+        st.info(f"🔍 최종 찾은 토크나이저: {tokenizer_name}")
         
         if tokenizer_name:
             # Hugging Face 토큰 확인
             hf_token = os.getenv('HUGGINGFACE_TOKEN')
             
-            # 특별한 설정이 필요한 모델들
-            if "qwen" in model_key.lower():
+            # deepseek-r1 모델은 특별한 설정이 필요할 수 있음
+            if "deepseek-r1" in model_key.lower():
+                st.info(f"🔍 deepseek-r1 모델 토크나이저를 로드합니다.")
                 if hf_token:
-                    return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
                 else:
-                    return AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+            # 특별한 설정이 필요한 모델들
+            elif "qwen" in model_key.lower():
+                if hf_token:
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
+                else:
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
             elif "gemma" in model_key.lower():
                 if hf_token:
-                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
                 else:
-                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
                 tokenizer.pad_token = tokenizer.eos_token
                 tokenizer.padding_side = "right"
-                return tokenizer
             elif "llama" in model_key.lower():
                 # Llama 모델은 토큰이 필요할 수 있음
                 if hf_token:
-                    return AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
                 else:
                     st.warning("Llama 모델에 접근하려면 HUGGINGFACE_TOKEN 환경변수를 설정해주세요.")
                     return None
             else:
                 if hf_token:
-                    return AutoTokenizer.from_pretrained(tokenizer_name, token=hf_token)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True, token=hf_token)
                 else:
-                    return AutoTokenizer.from_pretrained(tokenizer_name)
+                    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+            
+            # 세션 상태에 토크나이저 캐시
+            st.session_state[cache_key] = tokenizer
+            return tokenizer
         
         st.error(f"Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
         return None
@@ -570,8 +658,14 @@ def load_tokenizer(model_key):
         return None
 
 def generate_domain_prompt(domain: str, model_key: str) -> str:
-    """도메인별로 새로운 프롬프트를 생성합니다."""
-    prompt = f"""Generate a new question or prompt related to the {domain} domain.
+    """도메인별로 origin 폴더에서 프롬프트를 가져옵니다."""
+    origin_prompts = load_origin_prompts()
+    
+    if domain in origin_prompts and origin_prompts[domain]:
+        return random.choice(origin_prompts[domain])
+    else:
+        # fallback: 기존 방식으로 프롬프트 생성
+        prompt = f"""Generate a new question or prompt related to the {domain} domain.
 The prompt should be:
 1. Specific to the {domain} domain
 2. Clear and concise
@@ -580,110 +674,228 @@ The prompt should be:
 
 Please provide only the prompt without any additional text or explanation."""
 
-    try:
-        response = get_model_response(model_key, prompt)
-        # 응답에서 첫 번째 문장만 추출
-        prompt = response.split('\n')[0].strip()
-        return prompt
-    except Exception as e:
-        print(f"Error generating prompt: {str(e)}")
-        return f"Please enter your {domain} domain prompt here..."
+        try:
+            response = get_model_response(model_key, prompt)
+            # 응답에서 첫 번째 문장만 추출
+            prompt = response.split('\n')[0].strip()
+            return prompt
+        except Exception as e:
+            print(f"Error generating prompt: {str(e)}")
+            return f"Please enter your {domain} domain prompt here..."
 
 def show():
-    st.title("Dataset Generator")
+    st.title("📝 Domain Prompt Generator")
+    st.markdown("도메인별 프롬프트를 생성하고 모델 응답을 받습니다.")
     
-    # Model selection
-    st.subheader("🤖 Model")
+    # 강제 캐시 무효화 (개발 중에만 사용)
+    if st.sidebar.button("🔄 강제 새로고침", key="force_refresh_dataset"):
+        # 모든 캐시 무효화
+        get_running_models.clear()
+        get_available_models.clear()
+        # 세션 상태 초기화
+        keys_to_remove = [key for key in st.session_state.keys() if key.startswith(('tokenizer_', 'origin_prompts_cache', 'generated_prompts', 'prompt_generation_complete'))]
+        for key in keys_to_remove:
+            del st.session_state[key]
+        st.sidebar.success("강제 새로고침 완료!")
+        st.rerun()
     
-    # 모델 선택 방식
-    model_selection_method = st.radio(
-        "모델 선택 방식",
-        ["Hugging Face 모델 (토크나이저 사용)", "Ollama 모델 (실행 중인 모델)"],
-        horizontal=True,
-        key="model_selection_method"
-    )
+    # 세션 상태 초기화
+    if 'dataset_generator_initialized' not in st.session_state:
+        st.session_state.dataset_generator_initialized = True
     
-    if model_selection_method == "Hugging Face 모델 (토크나이저 사용)":
-        # Hugging Face 모델 목록
-        hf_models = list(MODEL_TOKENIZER_MAP.keys())
-        selected_model = st.selectbox(
-            "Hugging Face 모델 선택",
-            hf_models,
-            key="hf_model_selector"
-        )
-        model_key = selected_model
-        
-        # 토크나이저 로드
-        tokenizer = load_tokenizer(model_key)
-        if not tokenizer:
-            st.error(f"토크나이저를 로드할 수 없습니다: {model_key}")
-            return
+    # ===== 모델 선택 섹션 =====
+    st.markdown("---")
+    st.subheader("🤖 Model Selection")
+    
+    # Ollama 모델 목록 (캐시됨)
+    with st.spinner("🔄 사용 가능한 모델 목록을 확인하는 중..."):
+        models = get_available_models()
+    
+    # 디버깅 정보 표시
+    st.info(f"🔍 발견된 모델 수: {len(models)}개")
+    if models:
+        st.info(f"📋 모델 목록: {', '.join(models)}")
+    
+    if not models:
+        st.error("❌ 사용 가능한 Ollama 모델이 없습니다. Model Load 탭에서 모델을 다운로드해주세요.")
+        st.info("💡 해결 방법:")
+        st.info("1. Model Load 탭에서 '🔄 새로고침' 버튼을 클릭하세요")
+        st.info("2. 또는 이 페이지에서 '🔄 모델 목록 새로고침' 버튼을 클릭하세요")
+        return
+    
+    # 모델 선택과 상태 표시를 컬럼으로 배치
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        if models:
+            selected_model = st.selectbox(
+                "사용 가능한 Ollama 모델 선택",
+                models,
+                key="ollama_model_selector"
+            )
+            model_key = selected_model.lower()
+        else:
+            st.warning("⚠️ 선택할 수 있는 모델이 없습니다.")
+            model_key = None
+    
+    with col2:
+        if model_key:
+            # 모델 상태 확인
+            model_status = check_ollama_model_status_fast(model_key)
             
-        st.success(f"✅ 토크나이저 로드 완료: {MODEL_TOKENIZER_MAP[model_key]}")
-        
-    else:
-        # Ollama 모델 목록
-        models = get_running_models()
-        if not models:
-            st.error("실행 중인 Ollama 모델이 없습니다. Model Load 탭에서 모델을 시작해주세요.")
-            return
-        
-        selected_model = st.selectbox(
-            "실행 중인 Ollama 모델 선택",
-            models,
-            key="ollama_model_selector"
-        )
-        model_key = selected_model.lower()
-        
-        # 토크나이저 로드
-        tokenizer = load_tokenizer(model_key)
-        if not tokenizer:
-            st.warning(f"⚠️ 토크나이저를 찾을 수 없습니다: {model_key}")
-            st.info("지원되는 모델: " + ", ".join(MODEL_TOKENIZER_MAP.keys()))
-            return
+            # 토크나이저 로드 상태 표시
+            tokenizer = load_tokenizer(model_key)
+            if not tokenizer:
+                st.warning(f"⚠️ 토크나이저를 찾을 수 없습니다: {model_key}")
+                st.info("지원되는 모델: " + ", ".join(MODEL_TOKENIZER_MAP.keys()))
+                return
+            
+            # 캐시된 토크나이저인지 확인
+            cache_key = f"tokenizer_{model_key}"
+            if cache_key in st.session_state:
+                st.success(f"✅ 토크나이저 로드 완료 (캐시됨)")
+            else:
+                st.success(f"✅ 토크나이저 로드 완료")
+            
+            # 모델 실행 상태 표시
+            if model_status:
+                st.success(f"✅ 모델 실행 중: {model_key}")
+            else:
+                st.warning(f"⚠️ 모델 미실행: {model_key}")
+                st.info("💡 Model Load 탭에서 모델을 시작해주세요")
+        else:
+            st.warning("⚠️ 모델을 먼저 선택해주세요.")
+            tokenizer = None
     
-    # Domain selection
-    st.subheader("🎯 Domain")
+    # ===== 도메인 설정 섹션 =====
+    st.markdown("---")
+    st.subheader("🎯 Domain Configuration")
+    
     domains = ["Medical", "Legal", "Technical", "General"]
     
-    # Dataset generation settings
-    st.subheader("📊 Dataset Generation")
-    generation_mode = st.radio(
-        "Generation Mode",
-        ["Single Domain", "All Domains"],
-        help="단일 도메인 또는 모든 도메인에 대해 데이터셋을 생성합니다."
-    )
+    # 생성 모드와 도메인 선택을 컬럼으로 배치
+    col3, col4 = st.columns([1, 1])
     
-    if generation_mode == "Single Domain":
-        selected_domain = st.selectbox(
-            "Select domain",
-            domains,
-            key="domain_selector"
+    with col3:
+        generation_mode = st.radio(
+            "Generation Mode",
+            ["Single Domain", "All Domains"],
+            help="단일 도메인 또는 모든 도메인에 대해 데이터셋을 생성합니다."
         )
-        selected_domains = [selected_domain]
-    else:
-        selected_domain = domains[0]  # 기본값으로 첫 번째 도메인 선택
-        selected_domains = domains
     
-    num_datasets = st.number_input(
-        "Number of datasets per domain",
-        min_value=1,
-        max_value=100000,
-        value=5,
-        step=1,
-        help="각 도메인별로 생성할 데이터셋의 개수"
-    )
+    with col4:
+        if generation_mode == "Single Domain":
+            selected_domain = st.selectbox(
+                "Select domain",
+                domains,
+                key="domain_selector"
+            )
+            selected_domains = [selected_domain]
+        else:
+            selected_domain = domains[0]  # 기본값으로 첫 번째 도메인 선택
+            selected_domains = domains
+            st.info(f"모든 도메인 선택됨: {', '.join(domains)}")
     
-    # Generate dataset button
-    if st.button("🔄 Generate Dataset", key="generate_dataset"):
+    # ===== 섹션 1: 도메인 프롬프트 생성 =====
+    st.markdown("---")
+    st.markdown("## 🔥 STEP 1: Domain Prompt Generation")
+    st.markdown("### 도메인별 프롬프트를 생성하고 모델 응답을 받습니다.")
+    
+    # 프롬프트 생성 설정
+    col5, col6 = st.columns([1, 2])
+    
+    with col5:
+        num_prompts = st.number_input(
+            "Number of prompts per domain",
+            min_value=1,
+            max_value=10000,
+            value=5,
+            step=1,
+            help="각 도메인별로 생성할 프롬프트의 개수 (최대 10000개)"
+        )
+    
+    with col6:
+        if generation_mode == "All Domains":
+            total_prompts = len(domains) * num_prompts
+            st.metric("총 생성될 프롬프트", f"{total_prompts}개")
+        else:
+            st.metric("생성될 프롬프트", f"{num_prompts}개")
+    
+    # 프롬프트 생성 버튼
+    col7, col8 = st.columns([2, 1])
+    
+    with col7:
+        generate_disabled = not model_key or not tokenizer
+        generate_prompts_button = st.button("📝 Generate Prompts", type="primary", key="generate_prompts", disabled=generate_disabled)
+    
+    with col8:
+        col8_1, col8_2 = st.columns(2)
+        with col8_1:
+            if st.button("🔄 모델 목록 새로고침", key="refresh_models_dataset"):
+                get_available_models.clear()
+                st.success("모델 목록이 새로고침되었습니다!")
+        with col8_2:
+            if st.button("🔍 모델 상태 확인", key="check_model_status"):
+                if model_key:
+                    # 캐시 무효화 후 상태 확인
+                    get_running_models.clear()
+                    status = check_ollama_model_status_fast(model_key)
+                    if status:
+                        st.success(f"✅ {model_key} 모델이 실행 중입니다!")
+                    else:
+                        st.warning(f"⚠️ {model_key} 모델이 실행되지 않고 있습니다.")
+                        st.info("💡 Model Load 탭에서 모델을 시작한 후 다시 확인해주세요.")
+                else:
+                    st.warning("모델을 먼저 선택해주세요.")
+    
+    # 캐시 초기화 버튼
+    if st.button("🗑️ 캐시 초기화", key="clear_cache_dataset"):
+        # 캐시 함수들 초기화
+        get_available_models.clear()
+        # 세션 상태 캐시 초기화
+        keys_to_remove = [key for key in st.session_state.keys() if key.startswith(('tokenizer_', 'origin_prompts_cache'))]
+        for key in keys_to_remove:
+            del st.session_state[key]
+        st.success("캐시가 초기화되었습니다!")
+    
+    # ===== 프롬프트 생성 실행 =====
+    if generate_prompts_button:
+        if not model_key:
+            st.error("❌ 모델을 선택해주세요.")
+            return
+        
         if not tokenizer:
             st.warning(f"⚠️ Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
             return
         
-        # Ollama 모델인 경우 실행 상태 확인
-        if model_selection_method == "Ollama 모델 (실행 중인 모델)":
-            if not check_ollama_model_status(model_key):
-                st.error(f"❌ Model {model_key} is not running. Please start it in the Model Load tab.")
+        # Ollama 모델 실행 상태 확인 (더 정확한 확인)
+        # 캐시 무효화 후 상태 확인
+        get_running_models.clear()
+        model_status = check_ollama_model_status_fast(model_key)
+        
+        if not model_status:
+            # 실행 중인 모델 목록 확인
+            try:
+                response = requests.get(f"{OLLAMA_API_BASE}/api/ps", timeout=5)
+                if response.status_code == 200:
+                    running_models = response.json().get("models", [])
+                    if running_models:
+                        st.warning(f"⚠️ Model {model_key}가 실행되지 않고 있습니다.")
+                        st.info(f"💡 현재 실행 중인 모델: {', '.join([m.get('name', 'unknown') for m in running_models])}")
+                        st.info("💡 해결 방법:")
+                        st.info("1. Model Load 탭으로 이동")
+                        st.info("2. 올바른 모델을 선택하고 '🚀 모델 시작' 버튼 클릭")
+                        st.info("3. 모델이 실행된 후 이 페이지로 돌아와서 재시도")
+                    else:
+                        st.warning("⚠️ 실행 중인 Ollama 모델이 없습니다.")
+                        st.info("💡 Model Load 탭에서 모델을 시작해주세요.")
+                else:
+                    st.warning("⚠️ Ollama 서버에 연결할 수 없습니다.")
+                    st.info("💡 Ollama가 실행 중인지 확인해주세요.")
+                return
+            except Exception as e:
+                st.warning(f"⚠️ Model {model_key} 상태 확인 중 오류: {str(e)}")
+                st.info("💡 Model Load 탭에서 모델을 수동으로 시작해주세요.")
                 return
         
         try:
@@ -697,169 +909,144 @@ def show():
             # 전체 시작 시간 기록
             total_start_time = time.time()
             
+            # 생성된 프롬프트들을 저장할 임시 데이터
+            generated_prompts = {}
+            
             for domain_idx, domain in enumerate(selected_domains, 1):
                 # 도메인별 시작 시간 기록
                 domain_start_time = time.time()
                 
-                progress_text.text(f"Generating datasets for {domain} domain...")
+                progress_text.text(f"Generating prompts for {domain} domain...")
                 
-                with st.spinner(f"Generating {num_datasets} datasets for {domain} domain ({domain_idx}/{total_domains})..."):
-                    # Create output directory
-                    output_dir = Path(f"dataset/{model_key}/{domain.lower()}")
-                    output_dir.mkdir(parents=True, exist_ok=True)
+                with st.spinner(f"Generating {num_prompts} prompts for {domain} domain ({domain_idx}/{total_domains})..."):
+                    # 도메인별 프롬프트 리스트 초기화
+                    generated_prompts[domain] = []
                     
-                    # Create output file
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    output_path = output_dir / f"{model_key}_{num_datasets}prompts_{timestamp}.jsonl"
-                    
-                    # Generate datasets
-                    with open(output_path, "w", encoding="utf-8") as f:
-                        for i in range(num_datasets):
-                            # 진행상황 카운터 업데이트 (도메인 정보 포함)
-                            progress_counter.text(f"{domain} domain: {i+1}/{num_datasets}")
+                    for i in range(num_prompts):
+                        # 진행상황 카운터 업데이트 (도메인 정보 포함)
+                        progress_counter.text(f"{domain} domain: {i+1}/{num_prompts}")
+                        
+                        # 시간 정보 업데이트
+                        current_time = time.time()
+                        elapsed_time = current_time - total_start_time
+                        
+                        # 예상 시간 계산 (현재 진행률 기준)
+                        total_prompts_to_generate = total_domains * num_prompts
+                        completed_prompts = (domain_idx - 1) * num_prompts + i
+                        if completed_prompts > 0:
+                            avg_time_per_prompt = elapsed_time / completed_prompts
+                            remaining_prompts = total_prompts_to_generate - completed_prompts
+                            estimated_remaining_time = avg_time_per_prompt * remaining_prompts
+                            estimated_total_time = elapsed_time + estimated_remaining_time
                             
-                            # 시간 정보 업데이트
-                            current_time = time.time()
-                            elapsed_time = current_time - total_start_time
-                            
-                            # 예상 시간 계산 (현재 진행률 기준)
-                            total_datasets = total_domains * num_datasets
-                            completed_datasets = (domain_idx - 1) * num_datasets + i
-                            if completed_datasets > 0:
-                                avg_time_per_dataset = elapsed_time / completed_datasets
-                                remaining_datasets = total_datasets - completed_datasets
-                                estimated_remaining_time = avg_time_per_dataset * remaining_datasets
-                                estimated_total_time = elapsed_time + estimated_remaining_time
-                                
-                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
-                            else:
-                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
-                            
-                            # Generate new prompt for the domain
-                            if model_selection_method == "Ollama 모델 (실행 중인 모델)":
-                                prompt = generate_domain_prompt(domain, model_key)
-                                response = get_model_response(model_key, prompt)
-                            else:
-                                # Hugging Face 모델의 경우 기본 프롬프트 사용
-                                prompt = get_test_prompt(domain)
-                                response = "Generated using Hugging Face tokenizer"
-                            
-                            # Tokenize and extract evidence
-                            tokens = tokenizer.tokenize(prompt)
-                            
-                            if model_selection_method == "Ollama 모델 (실행 중인 모델)":
-                                query = f"""Given the following text and prompt, extract evidence tokens that support the answer to the prompt.
-Text: {prompt}
-Prompt: {prompt}
-
-Please provide the evidence in the following JSON format:
-{{
-    "evidence_token_index": [list of token indices],
-    "evidence": [list of evidence tokens]
-}}
-
-Rules:
-1. Only include tokens that directly support the answer
-2. Maintain the original order of tokens
-3. Include complete phrases or sentences
-4. Do not include words unrelated to the domain"""
-
-                                evidence_response = get_model_response(model_key, query)
-                            else:
-                                # Hugging Face 모델의 경우 기본 evidence 추출
-                                evidence_indices, evidence_tokens = extract_evidence_with_ollama(prompt, tokens, "default")
-                                evidence_response = json.dumps({
-                                    "evidence_token_index": evidence_indices,
-                                    "evidence": evidence_tokens
-                                })
-                            
-                            try:
-                                # Extract JSON part from response
-                                if model_selection_method == "Ollama 모델 (실행 중인 모델)":
-                                    json_match = re.search(r'(\{.*\})', evidence_response, re.DOTALL)
-                                    if json_match:
-                                        evidence_data = json.loads(json_match.group(1))
-                                    else:
-                                        evidence_data = {"evidence_token_index": [], "evidence": []}
-                                else:
-                                    evidence_data = json.loads(evidence_response)
-                                
-                                evidence_indices = evidence_data.get("evidence_token_index", [])
-                                evidence_tokens = evidence_data.get("evidence", [])
-                                
-                                # Create output data
-                                output = {
-                                    "prompt": prompt,
-                                    "response": response,
-                                    "evidence_indices": evidence_indices,
-                                    "evidence_tokens": evidence_tokens,
-                                    "model": model_key,
-                                    "domain": domain,
-                                    "timestamp": timestamp,
-                                    "index": i + 1
-                                }
-                                
-                                # Write to file
-                                f.write(json.dumps(output, ensure_ascii=False) + "\n")
-                                
-                            except json.JSONDecodeError as e:
-                                st.warning(f"Error parsing evidence response for dataset {i+1}: {str(e)}")
-                                continue
+                            time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
+                        else:
+                            time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
+                        
+                        # Generate new prompt for the domain
+                        prompt = generate_domain_prompt(domain, model_key)
+                        
+                        # 프롬프트 정보 저장 (response 제외)
+                        prompt_data = {
+                            "prompt": prompt,
+                            "model": model_key,
+                            "domain": domain,
+                            "index": i + 1
+                        }
+                        
+                        generated_prompts[domain].append(prompt_data)
                     
                     # 도메인별 완료 시간 계산
-                    domain_elapsed_time = time.time() - domain_start_time
-                    st.success(f"✅ Generated {num_datasets} datasets for {domain} domain (소요시간: {domain_elapsed_time:.1f}초)")
-                    st.success(f"Dataset saved to {output_path}")
-                
-                # Add a small delay between domains
-                if domain_idx < total_domains:
-                    time.sleep(1)
+                    domain_end_time = time.time()
+                    domain_duration = domain_end_time - domain_start_time
+                    print(f"{domain} domain prompts completed in {domain_duration:.2f} seconds")
             
             # 전체 완료 시간 계산
-            total_elapsed_time = time.time() - total_start_time
+            total_end_time = time.time()
+            total_duration = total_end_time - total_start_time
             
-            # 진행상황 컨테이너들 정리
+            # 진행상황 표시 정리
             progress_text.empty()
             progress_counter.empty()
             time_info.empty()
             
-            st.success(f"🎉 Completed generating datasets for all {total_domains} domains! (총 소요시간: {total_elapsed_time:.1f}초)")
-                
-        except Exception as e:
-            st.error(f"Error during dataset generation: {str(e)}")
-            return
-    
-    # Prompt input (for manual testing)
-    st.subheader("✍️ Manual Testing")
-    if model_selection_method == "Ollama 모델 (실행 중인 모델)":
-        prompt = st.text_area(
-            "Enter your prompt",
-            value=generate_domain_prompt(selected_domain, model_key),
-            height=150,
-            key="prompt_input"
-        )
-    else:
-        prompt = st.text_area(
-            "Enter your prompt",
-            value=get_test_prompt(selected_domain),
-            height=150,
-            key="prompt_input"
-        )
-    
-    # Extract evidence button
-    if st.button("🎯 Extract Evidence", key="extract_evidence"):
-        if not tokenizer:
-            st.warning(f"⚠️ Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
-            return
-        
-        tokens = tokenizer.tokenize(prompt)
-        with st.spinner("Extracting evidence..."):
-            if model_selection_method == "Ollama 모델 (실행 중인 모델)":
-                evidence_indices, evidence_tokens = extract_evidence_with_ollama(prompt, tokens, model_key)
-            else:
-                evidence_indices, evidence_tokens = extract_evidence_with_ollama(prompt, tokens, "default")
+            # 생성된 프롬프트를 세션에 저장
+            st.session_state.generated_prompts = generated_prompts
+            st.session_state.prompt_generation_complete = True
             
-            if evidence_indices and evidence_tokens:
-                st.markdown("### Extracted Evidence:")
-                for idx, token in zip(evidence_indices, evidence_tokens):
-                    st.markdown(f"- **{idx}**: {token}")
+            # ===== 프롬프트 파일 저장 =====
+            st.markdown("---")
+            st.subheader("💾 Saving Generated Prompts")
+            
+            # 도메인별로 파일 저장
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            saved_files = []
+            
+            for domain, prompts in generated_prompts.items():
+                if prompts:
+                    # Create output directory
+                    output_dir = Path(f"dataset/origin/{domain.lower()}")
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Create output file
+                    output_path = output_dir / f"{domain.lower()}_{len(prompts)}prompts_{timestamp}.jsonl"
+                    
+                    # Save to file
+                    with open(output_path, "w", encoding="utf-8") as f:
+                        for prompt_data in prompts:
+                            f.write(json.dumps(prompt_data, ensure_ascii=False) + "\n")
+                    
+                    saved_files.append((domain, output_path, len(prompts)))
+            
+            # ===== 저장 결과 표시 =====
+            st.markdown("---")
+            st.subheader("✅ Prompt Generation Complete!")
+            
+            # 결과 요약을 컬럼으로 배치
+            col13, col14, col15 = st.columns(3)
+            
+            with col13:
+                st.metric("총 소요 시간", f"{total_duration:.1f}초")
+            
+            with col14:
+                st.metric("처리된 도메인", f"{total_domains}개")
+            
+            with col15:
+                total_generated = total_domains * num_prompts
+                st.metric("생성된 프롬프트", f"{total_generated}개")
+            
+            # 생성된 파일 목록 표시
+            st.markdown("---")
+            st.subheader("📋 Generated Files")
+            
+            for domain, file_path, count in saved_files:
+                with st.container():
+                    col16, col17 = st.columns([3, 1])
+                    with col16:
+                        st.write(f"📄 **{domain}** 도메인: `{file_path.name}` ({count}개 프롬프트)")
+                    with col17:
+                        st.write(f"📍 `{file_path.parent}`")
+            
+            # 출력 디렉토리 정보
+            st.info(f"📁 모든 파일이 `dataset/origin/` 디렉토리에 저장되었습니다.")
+            st.success("🎉 프롬프트 생성이 완료되었습니다! 이제 Evidence 추출 페이지에서 evidence를 추출할 수 있습니다.")
+            
+        except Exception as e:
+            st.markdown("---")
+            st.subheader("❌ Prompt Generation Failed")
+            
+            # 에러 정보를 컬럼으로 배치
+            col15, col16 = st.columns([2, 1])
+            
+            with col15:
+                st.error(f"프롬프트 생성 중 오류가 발생했습니다:")
+                st.code(str(e))
+            
+            with col16:
+                st.warning("💡 해결 방법:")
+                st.write("1. 모델이 실행 중인지 확인")
+                st.write("2. 네트워크 연결 상태 확인")
+                st.write("3. 캐시를 초기화하고 재시도")
+            
+            print(f"Prompt generation error: {str(e)}")
+    

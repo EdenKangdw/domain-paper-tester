@@ -1,0 +1,1 @@
+{"prompt": "What are the key clinical findings?", "domain": "Medical", "model": "mistral:7b", "index": 1, "evidence_indices": [4, 9], "evidence_tokens": ["clinical", "findings"], "timestamp": "20250703_034500"}
