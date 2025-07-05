@@ -1,0 +1,5 @@
+{"prompt": "**In the context of oncology, what are the key considerations and potential challenges associated with the implementation of personalized immunotherapy for patients with advanced lung cancer?**", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "What are the key clinical features associated with early-stage Parkinson's disease?", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "**What are the key clinical manifestations associated with a diagnosis of viral encephalitis in pediatric patients?**", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "What are the key clinical findings associated with early-stage Alzheimer's disease?", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "What are the primary ethical considerations when implementing AI-powered diagnostic tools in clinical practice?", "model": "llama2:7b", "domain": "Medical", "index": 5}

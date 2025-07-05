@@ -25,7 +25,18 @@ def get_model_response(model_name: str, prompt: str) -> str:
             timeout=30
         )
         if response.status_code == 200:
-            return response.json().get("response", "")
+            response_text = response.json().get("response", "")
+            
+            # deepseek 모델의 <think> 태그 제거
+            if "deepseek" in model_name.lower():
+                import re
+                # <think>...</think> 태그와 내용 제거
+                response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+                # <think> 태그만 있는 경우 제거
+                response_text = re.sub(r'<think>\s*</think>', '', response_text)
+                response_text = response_text.strip()
+            
+            return response_text
         else:
             raise Exception(f"API 요청 실패: {response.status_code}")
     except Exception as e:

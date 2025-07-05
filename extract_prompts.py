@@ -22,7 +22,7 @@ def extract_prompts_from_jsonl(file_path):
 def main():
     # 각 도메인별로 처리할 파일들
     domain_files = {
-        "general": "dataset/gemma:7b/general/gemma:7b_1000prompts_20250623_074130.jsonl",
+        "economy": "dataset/gemma:7b/economy/gemma:7b_1000prompts_20250623_074130.jsonl",
         "legal": "dataset/gemma:7b/legal/gemma:7b_1000prompts_20250623_042404.jsonl", 
         "medical": "dataset/gemma:7b/medical/gemma:7b_1000prompts_20250623_023509.jsonl",
         "technical": "dataset/gemma:7b/technical/gemma:7b_1000prompts_20250623_061457.jsonl"

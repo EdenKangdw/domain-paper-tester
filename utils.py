@@ -128,7 +128,7 @@ def check_ollama_model_status(model_name):
                 "prompt": "test",
                 "stream": False
             },
-            timeout=5
+            timeout=15  # 타임아웃을 15초로 연장 (큰 모델 로딩 시간 고려)
         )
         return response.status_code == 200
     except:
@@ -214,38 +214,24 @@ def stop_ollama_model():
 def chat_with_model(model_name, prompt):
     """모델과 대화"""
     try:
-        response_container = st.empty()
-        current_response = []
-
-        process = Popen(
-            f"curl -s -N -X POST http://localhost:11434/api/generate -d '{{\"model\":\"{model_name}\",\"prompt\":\"{prompt}\"}}'",
-            shell=True,
-            stdout=PIPE,
-            stderr=PIPE,
-            bufsize=1,
-            universal_newlines=True
+        # requests 라이브러리를 사용하여 API 호출
+        response = requests.post(
+            f"{OLLAMA_API_BASE}/api/generate",
+            json={
+                "model": model_name,
+                "prompt": prompt,
+                "stream": False
+            },
+            timeout=30
         )
         
-        for line in iter(process.stdout.readline, ''):
-            if line.strip():
-                try:
-                    data = json.loads(line)
-                    if 'response' in data:
-                        current_response.append(data['response'])
-                        response_container.markdown(''.join(current_response))
-                except json.JSONDecodeError:
-                    continue
-        
-        process.stdout.close()
-        process.wait()
-        
-        if current_response:
-            return ''.join(current_response)
+        if response.status_code == 200:
+            result = response.json()
+            return result.get("response", "응답을 받지 못했습니다.")
         else:
-            return '응답을 받지 못했습니다.'
+            return f"API 오류: {response.status_code}"
             
     except Exception as e:
-        st.error(f"요청 중 오류 발생: {str(e)}")
         return f"오류 발생: {str(e)}"
 
 @st.cache_data(ttl=30)  # 30초 캐시
@@ -365,10 +351,10 @@ def extract_evidence_with_ollama(prompt, tokens, model_key, domain):
     try:
         # 도메인별 evidence 추출 프롬프트 생성
         domain_prompts = {
-            "General": "일반적인 상식, 사실, 정보와 관련된 토큰들을 찾아주세요.",
-            "Legal": "법률, 규정, 계약, 권리, 의무와 관련된 토큰들을 찾아주세요.",
-            "Medical": "의학, 건강, 질병, 치료, 약물과 관련된 토큰들을 찾아주세요.",
-            "Technical": "기술, 과학, 엔지니어링, 컴퓨터, 시스템과 관련된 토큰들을 찾아주세요."
+            "Economy": "Find tokens related to economy, finance, market, investment, currency, and trade.",
+            "Legal": "Find tokens related to law, regulations, contracts, rights, and obligations.",
+            "Medical": "Find tokens related to medicine, health, disease, treatment, and drugs.",
+            "Technical": "Find tokens related to technology, science, engineering, computers, and systems."
         }
         
         domain_instruction = domain_prompts.get(domain, "도메인 관련 중요한 토큰들을 찾아주세요.")
@@ -500,6 +486,16 @@ def get_model_response(model_name, prompt):
         if response.status_code == 200:
             result = response.json()
             response_text = result.get("response", "").strip()
+            
+            # deepseek 모델의 <think> 태그 제거
+            if "deepseek" in model_name.lower():
+                import re
+                # <think>...</think> 태그와 내용 제거
+                response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+                # <think> 태그만 있는 경우 제거
+                response_text = re.sub(r'<think>\s*</think>', '', response_text)
+                response_text = response_text.strip()
+            
             return response_text
         else:
             print(f"API 요청 실패: {response.status_code}")
@@ -626,10 +622,10 @@ def extract_evidence_with_ollama(prompt, tokens, model_key, domain):
     try:
         # 도메인별 evidence 추출 프롬프트 생성
         domain_prompts = {
-            "General": "일반적인 상식, 사실, 정보와 관련된 토큰들을 찾아주세요.",
-            "Legal": "법률, 규정, 계약, 권리, 의무와 관련된 토큰들을 찾아주세요.",
-            "Medical": "의학, 건강, 질병, 치료, 약물과 관련된 토큰들을 찾아주세요.",
-            "Technical": "기술, 과학, 엔지니어링, 컴퓨터, 시스템과 관련된 토큰들을 찾아주세요."
+            "Economy": "Find tokens related to economy, finance, market, investment, currency, and trade.",
+            "Legal": "Find tokens related to law, regulations, contracts, rights, and obligations.",
+            "Medical": "Find tokens related to medicine, health, disease, treatment, and drugs.",
+            "Technical": "Find tokens related to technology, science, engineering, computers, and systems."
         }
         
         domain_instruction = domain_prompts.get(domain, "도메인 관련 중요한 토큰들을 찾아주세요.")

@@ -62,7 +62,7 @@ if page == "🏠 홈":
 
     - **Evidence 토큰 식별**: 각 도메인에서 핵심적인 토큰들을 자동으로 식별
     - **어텐션 패턴 분석**: 모델의 각 어텐션 헤드가 evidence 토큰에 어떻게 반응하는지 분석
-    - **도메인별 특성**: Medical, Legal, Technical, General 도메인별 어텐션 패턴 차이 연구
+    - **도메인별 특성**: Medical, Legal, Technical, Economy 도메인별 어텐션 패턴 차이 연구
     - **해석 가능성**: 모델 내부 동작의 해석 가능성 향상
 
     ### 📊 지원 도메인
@@ -70,7 +70,7 @@ if page == "🏠 홈":
     - **Medical**: 의학 관련 프롬프트 및 전문 용어
     - **Legal**: 법률 관련 프롬프트 및 법적 개념
     - **Technical**: 기술 관련 프롬프트 및 프로그래밍 개념
-    - **General**: 일반적인 프롬프트 및 범용 개념
+    - **Economy**: Economy-related prompts and economic concepts
 
     ### 🚀 시작하기
 

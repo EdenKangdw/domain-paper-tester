@@ -52,7 +52,7 @@ def show():
     # 실험 개요를 expander로 변경
     with st.expander("📝 실험 개요", expanded=False):
         st.markdown("""
-        이 실험은 다양한 도메인(General, Technical, Legal, Medical)의 데이터셋을 활용하여, 각 프롬프트에서 evidence 토큰에 대해 언어모델의 어텐션 헤드가 어떻게 반응하는지 분석합니다.
+        이 실험은 다양한 도메인(Economy, Technical, Legal, Medical)의 데이터셋을 활용하여, 각 프롬프트에서 evidence 토큰에 대해 언어모델의 어텐션 헤드가 어떻게 반응하는지 분석합니다.
         
         **evidence의 의미:**
         - 데이터셋에서 `evidence`란, 각 프롬프트(질문)에 대해 정답을 도출하는 데 핵심적인 역할을 하는 단어나 구(토큰)를 의미합니다.
@@ -133,7 +133,7 @@ def show():
                     
                     **해석 방법:**
                     - x축: 어텐션 헤드 번호
-                    - y축: 도메인 (Medical, Legal, Technical, General)
+                    - y축: 도메인 (Medical, Legal, Technical, Economy)
                     - 색상 강도: 해당 도메인-헤드 조합에서 evidence에 가장 강하게 반응한 횟수
                         - 밝은 색상(노란색/빨간색): 높은 빈도
                         - 어두운 색상: 낮은 빈도

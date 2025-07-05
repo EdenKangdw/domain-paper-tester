@@ -1,0 +1,5 @@
+{"prompt": "Describe the primary technical considerations when implementing blockchain technology for supply chain management.", "model": "llama2:7b", "domain": "Technical", "index": 1}
+{"prompt": "Describe the role of caching in improving the performance of large-scale web applications. Explain how caching can mitigate the impact of increased user concurrency on system resources.", "model": "llama2:7b", "domain": "Technical", "index": 2}
+{"prompt": "Describe the primary technical considerations involved in implementing a decentralized storage solution for a large-scale IoT network.", "model": "llama2:7b", "domain": "Technical", "index": 3}
+{"prompt": "Describe the role of caching in improving the performance of large-scale web applications. Explain how caching strategies can be optimized to enhance scalability and reduce latency.", "model": "llama2:7b", "domain": "Technical", "index": 4}
+{"prompt": "Describe the primary functionalities and technical considerations for implementing a blockchain-based supply chain management system.", "model": "llama2:7b", "domain": "Technical", "index": 5}

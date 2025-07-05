@@ -1,0 +1,5 @@
+{"prompt": "**Within the context of oncology, what are the primary mechanisms of action for immune checkpoint inhibitors in the treatment of melanoma?**", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "Within the context of oncology, what are the primary clinical features associated with a diagnosis of metastatic melanoma?", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "Describe the role of telomeres in cellular senescence and their potential implications for cancer treatment strategies.", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "Within the context of oncology, identify the primary mechanism of action for the latest generation of tyrosine kinase inhibitors in treating advanced melanoma.", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "What are the key clinical features associated with early-stage diagnosis of Alzheimer's disease?", "model": "llama2:7b", "domain": "Medical", "index": 5}

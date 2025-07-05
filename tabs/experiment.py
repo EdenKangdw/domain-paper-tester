@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import json
+import requests
 from utils import get_available_models
 import pandas as pd
 from datetime import datetime
@@ -75,7 +76,7 @@ def create_model_directories(model_name):
     os.makedirs(dataset_path, exist_ok=True)
     
     # 도메인별 하위 디렉토리 생성
-    domains = ["general", "technical", "legal", "medical"]
+    domains = ["economy", "technical", "legal", "medical"]
     for domain in domains:
         os.makedirs(os.path.join(dataset_path, domain), exist_ok=True)
     
@@ -84,7 +85,7 @@ def create_model_directories(model_name):
 def get_model_dataset_files(model_name):
     """특정 모델의 데이터셋 파일 목록을 가져옵니다."""
     dataset_path = get_model_dataset_path(model_name)
-    domains = ["general", "technical", "legal", "medical"]
+    domains = ["economy", "technical", "legal", "medical"]
     files = {}
     
     for domain in domains:
@@ -128,7 +129,7 @@ def copy_original_dataset_to_model(model_name):
     
     try:
         # 원본 데이터셋의 모든 파일을 모델별 디렉토리로 복사
-        domains = ["general", "technical", "legal", "medical"]
+        domains = ["economy", "technical", "legal", "medical"]
         for domain in domains:
             original_domain_path = os.path.join(original_dataset_path, domain)
             model_domain_path = os.path.join(model_dataset_path, domain)
@@ -156,7 +157,7 @@ def copy_original_dataset_to_model(model_name):
 
 # 각 도메인별 데이터셋 파일 목록을 가져오는 함수 (기존 호환성 유지)
 def get_dataset_files():
-    domains = ["general", "technical", "legal", "medical"]
+    domains = ["economy", "technical", "legal", "medical"]
     files = {}
     for domain in domains:
         domain_path = os.path.join(DATASET_ROOT, domain)
@@ -552,9 +553,272 @@ def analyze_head_attention_pattern(attn, tokens, evidence_indices, target_head=2
     plt.tight_layout()
     return fig, stats, head_attention
 
+def batch_domain_experiment_multi_models(model_names, files, num_prompts=20):
+    """
+    여러 모델에 대해 evidence 어텐션 실험을 일괄 수행하고 통계 집계
+    model_names: 사용할 모델명 리스트
+    files: {domain: filename} 형태의 선택된 파일들
+    num_prompts: 도메인별 샘플링할 프롬프트 개수
+    """
+    import time
+    from datetime import datetime, timedelta
+    
+    all_results = []
+    error_logs = []  # 에러 로그 저장용
+    
+    # 전체 작업량 계산 (모델 수 * 도메인 수 * 프롬프트 수)
+    total_tasks = len(model_names) * len(files) * num_prompts
+    completed_tasks = 0
+    start_time = time.time()
+    
+    # 진행 상황 표시
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # 모델별 진행 상황 추적
+    model_progress = {}
+    for model_name in model_names:
+        model_progress[model_name] = {}
+        for domain in files.keys():
+            model_progress[model_name][domain] = 0
+    
+    for model_name in model_names:
+        st.info(f"🔄 {model_name} 모델 실험 시작...")
+        
+        # 각 모델에 대해 실험 수행
+        model_results = batch_domain_experiment_single_model(model_name, files, num_prompts, 
+                                                           progress_bar, status_text, 
+                                                           model_progress, completed_tasks, 
+                                                           total_tasks, start_time)
+        
+        all_results.extend(model_results)
+        
+        # 모델별 결과 저장
+        if model_results:
+            save_experiment_result(model_results, model_name)
+            st.success(f"✅ {model_name} 모델 실험 완료! {len(model_results)}개 결과")
+        
+        # 모델 언로드 (메모리 절약)
+        unload_model_from_session()
+    
+    # 전체 결과 요약
+    if all_results:
+        st.success(f"🎉 모든 모델 실험 완료! 총 {len(all_results)}개 결과")
+        
+        # 모델별 결과 요약
+        model_summary = {}
+        for result in all_results:
+            model_name = result['model_name']
+            if model_name not in model_summary:
+                model_summary[model_name] = {'count': 0, 'domains': set()}
+            model_summary[model_name]['count'] += 1
+            model_summary[model_name]['domains'].add(result['domain'])
+        
+        st.subheader("📊 실험 결과 요약")
+        for model_name, summary in model_summary.items():
+            domains_str = ', '.join(sorted(summary['domains']))
+            st.info(f"**{model_name}**: {summary['count']}개 결과 ({domains_str} 도메인)")
+    
+    return all_results
+
+def batch_domain_experiment_single_model(model_name, files, num_prompts=20, 
+                                       progress_bar=None, status_text=None, 
+                                       model_progress=None, completed_tasks=0, 
+                                       total_tasks=0, start_time=None):
+    """
+    단일 모델에 대해 evidence 어텐션 실험을 수행
+    """
+    import time
+    from datetime import datetime, timedelta
+    
+    results = []
+    error_logs = []  # 에러 로그 저장용
+    
+    # 모델 로드
+    with st.spinner(f"{model_name} 모델을 로드하는 중..."):
+        success = load_model_to_session(model_name)
+        if not success:
+            st.error(f"❌ {model_name} 모델 로드에 실패했습니다.")
+            return results
+    
+    # 서버 메모리에 로드된 모델이 있는지 확인
+    if 'model' in st.session_state and 'tokenizer' in st.session_state:
+        model = st.session_state['model']
+        tokenizer = st.session_state['tokenizer']
+        
+        # 모델과 토크나이저가 실제로 None이 아닌지 확인
+        if model is None or tokenizer is None:
+            st.error("모델 또는 토크나이저가 None입니다. 모델을 다시 로드해주세요.")
+            return results
+    else:
+        st.error("모델이 세션에 로드되어 있지 않습니다. 실험을 진행하려면 먼저 모델을 로드해주세요.")
+        return results
+
+    # 도메인별 진행 상황 추적
+    domain_progress = {}
+    for domain in files.keys():
+        domain_progress[domain] = 0
+    
+    for domain, selected_file in files.items():
+        if not selected_file:
+            continue
+        
+        # 모델별 데이터셋에서 프롬프트 가져오기 (최대 10000개)
+        prompts = get_model_prompts(model_name, domain, selected_file, max_count=10000)
+        if not prompts:
+            continue
+        
+        # 프롬프트 샘플링
+        sampled = prompts[:num_prompts]
+        
+        # 모델별 데이터셋 경로 사용
+        path = os.path.join(get_model_dataset_path(model_name), domain, selected_file)
+        try:
+            with open(path, "r") as f:
+                lines = f.readlines()
+        except Exception as e:
+            continue
+            
+        domain_results = 0
+        for i, prompt in enumerate(sampled):
+            try:
+                idx = prompts.index(prompt)
+                data = json.loads(lines[idx])
+                evidence_indices = data.get("evidence_indices", [])
+                
+                # 어텐션 추출
+                inputs = tokenizer(prompt, return_tensors="pt")
+                # 모델의 디바이스 확인 및 입력 이동
+                try:
+                    device = next(model.parameters()).device
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                except Exception as device_error:
+                    # 디바이스 확인 실패 시 CPU 사용
+                    inputs = {k: v.to('cpu') for k, v in inputs.items()}
+                
+                with torch.no_grad():
+                    try:
+                        outputs = model(**inputs, output_attentions=True)
+                        attentions = tuple(attn.cpu().numpy() for attn in outputs.attentions)
+                    except Exception as attn_error:
+                        continue
+                tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
+                
+                # evidence_indices 타입 확인 및 안전한 처리
+                if isinstance(evidence_indices, list):
+                    evidence_indices = [i for i in evidence_indices if isinstance(i, (int, float)) and i < len(tokens)]
+                else:
+                    # evidence_indices가 리스트가 아닌 경우 빈 리스트로 초기화
+                    evidence_indices = []
+                
+                last_attn = attentions[-1][0]  # (head, from_token, to_token)
+                # 헤드별 evidence 어텐션 평균
+                head_count = last_attn.shape[0]
+                avg_evidence_attention_whole = []
+                for h in range(head_count):
+                    if evidence_indices:  # evidence_indices가 비어있지 않을 때만 계산
+                        try:
+                            avg = last_attn[h, :, evidence_indices].mean()
+                        except (IndexError, ValueError):
+                            avg = 0.0  # 인덱스 에러 발생 시 0 반환
+                    else:
+                        avg = 0.0  # evidence_indices가 비어있으면 0 반환
+                    avg_evidence_attention_whole.append(avg)
+                max_head = int(np.argmax(avg_evidence_attention_whole))
+                results.append({
+                    "domain": domain,
+                    "prompt": prompt,
+                    "max_head": max_head,
+                    "avg_evidence_attention": avg_evidence_attention_whole[max_head],  # 기존 max값 (호환성 유지)
+                    "avg_evidence_attention_whole": avg_evidence_attention_whole,  # 32차원 리스트 전체 저장
+                    "evidence_indices": evidence_indices,
+                    "tokens": tokens,
+                    "model_name": model_name,
+                    "tokenizer_name": tokenizer.name_or_path if hasattr(tokenizer, 'name_or_path') else "unknown"
+                })
+                domain_results += 1
+                domain_progress[domain] = domain_results
+                if model_progress and model_name in model_progress:
+                    model_progress[model_name][domain] = domain_results
+                completed_tasks += 1
+                
+                # 진행 상황 업데이트
+                if progress_bar and status_text and start_time:
+                    elapsed_time = time.time() - start_time
+                    if completed_tasks > 0:
+                        avg_time_per_task = elapsed_time / completed_tasks
+                        remaining_tasks = total_tasks - completed_tasks
+                        estimated_remaining_time = remaining_tasks * avg_time_per_task
+                        
+                        # 시간 포맷팅
+                        elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+                        remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
+                        
+                        # 프로그레스바와 상태 정보 업데이트
+                        progress_bar.progress(completed_tasks / total_tasks)
+                        
+                        # 모든 모델과 도메인의 진행 상황 표시
+                        progress_info = []
+                        for m, domains in model_progress.items():
+                            for d, progress in domains.items():
+                                progress_info.append(f"{m}-{d}: {progress}/{num_prompts}")
+                        
+                        status_text.write(f"**소요시간: {elapsed_str} / 남은 시간: {remaining_str}**  \n**{' | '.join(progress_info)}**")
+                
+            except Exception as e:
+                completed_tasks += 1
+                # 에러 로그 저장
+                error_log = {
+                    "model_name": model_name,
+                    "domain": domain,
+                    "prompt_index": i+1,
+                    "error": str(e),
+                    "timestamp": datetime.now().isoformat()
+                }
+                error_logs.append(error_log)
+                
+                # 에러 로그를 상태 텍스트에 추가
+                if progress_bar and status_text and start_time:
+                    elapsed_time = time.time() - start_time
+                    if completed_tasks > 0:
+                        avg_time_per_task = elapsed_time / completed_tasks
+                        remaining_tasks = total_tasks - completed_tasks
+                        estimated_remaining_time = remaining_tasks * avg_time_per_task
+                        elapsed_str = str(timedelta(seconds=int(elapsed_time)))
+                        remaining_str = str(timedelta(seconds=int(estimated_remaining_time)))
+                    else:
+                        elapsed_str = "0:00:00"
+                        remaining_str = "0:00:00"
+                    
+                    error_msg = f"❌ {model_name}-{domain} 도메인 {i+1}번째 프롬프트 처리 실패: {str(e)}"
+                    
+                    # 모든 모델과 도메인의 진행 상황 표시
+                    progress_info = []
+                    for m, domains in model_progress.items():
+                        for d, progress in domains.items():
+                            progress_info.append(f"{m}-{d}: {progress}/{num_prompts}")
+                    
+                    status_text.write(f"**소요시간: {elapsed_str} / 남은 시간: {remaining_str}**  \n**{' | '.join(progress_info)}**  \n{error_msg}")
+                continue
+
+    # 에러 로그가 있으면 파일에 저장
+    if error_logs:
+        experiment_path = get_model_experiment_path(model_name)
+        os.makedirs(experiment_path, exist_ok=True)
+        now = datetime.now().strftime("%Y%m%d_%H%M%S")
+        error_log_file = f"{experiment_path}/{now}_{model_name.replace(':','_')}_errors.json"
+        with open(error_log_file, "w", encoding="utf-8") as f:
+            json.dump(error_logs, f, ensure_ascii=False, indent=2)
+        
+        # 에러 개수 표시
+        if status_text:
+            status_text.write(f"✅ {model_name} 실험 완료! 총 {len(results)}개 결과, {len(error_logs)}개 에러 발생  \n에러 로그: {error_log_file}")
+    
+    return results
+
 def batch_domain_experiment(model_name, files, num_prompts=20):
     """
-    여러 도메인에 대해 evidence 어텐션 실험을 일괄 수행하고 통계 집계
+    여러 도메인에 대해 evidence 어텐션 실험을 일괄 수행하고 통계 집계 (단일 모델용)
     model_name: 사용할 모델명
     files: {domain: filename} 형태의 선택된 파일들
     num_prompts: 도메인별 샘플링할 프롬프트 개수
@@ -861,53 +1125,107 @@ def show():
         st.error("사용 가능한 모델이 없습니다. Model Load 탭에서 모델을 설치해주세요.")
         return
     
-    selected_model = st.selectbox(
-        "실험할 모델을 선택하세요",
-        available_models,
-        key="experiment_model_selector"
+    # 실험 모드 선택
+    experiment_mode = st.radio(
+        "실험 모드를 선택하세요",
+        ["단일 모델 실험", "다중 모델 실험"],
+        key="experiment_mode_selector"
     )
     
-    # 모델 로드/언로드 버튼
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📥 모델 로드", type="primary", key="load_model_btn"):
-            if selected_model != st.session_state.current_model_name:
-                # 다른 모델을 로드하는 경우
+    if experiment_mode == "단일 모델 실험":
+        # 단일 모델 선택
+        selected_model = st.selectbox(
+            "실험할 모델을 선택하세요",
+            available_models,
+            key="experiment_model_selector"
+        )
+        
+        # 모델 로드/언로드 버튼
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📥 모델 로드", type="primary", key="load_model_btn"):
+                if selected_model != st.session_state.current_model_name:
+                    # 다른 모델을 로드하는 경우
+                    if st.session_state.model_loaded:
+                        unload_model_from_session()
+                    
+                    with st.spinner(f"{selected_model} 모델을 로드하는 중..."):
+                        success = load_model_to_session(selected_model)
+                        if success:
+                            st.session_state.model_loaded = True
+                            st.session_state.current_model_name = selected_model
+                            st.success(f"✅ {selected_model} 모델이 로드되었습니다!")
+                        else:
+                            st.error(f"❌ {selected_model} 모델 로드에 실패했습니다.")
+                else:
+                    st.info("이미 로드된 모델입니다.")
+        
+        with col2:
+            if st.button("📤 모델 언로드", type="secondary", key="unload_model_btn"):
                 if st.session_state.model_loaded:
                     unload_model_from_session()
-                
-                with st.spinner(f"{selected_model} 모델을 로드하는 중..."):
-                    success = load_model_to_session(selected_model)
-                    if success:
-                        st.session_state.model_loaded = True
-                        st.session_state.current_model_name = selected_model
-                        st.success(f"✅ {selected_model} 모델이 로드되었습니다!")
+                    st.session_state.model_loaded = False
+                    st.session_state.current_model_name = None
+                    st.success("✅ 모델이 언로드되었습니다!")
+                else:
+                    st.info("로드된 모델이 없습니다.")
+        
+        with col3:
+            if st.button("🔄 모델 목록 새로고침", type="secondary", key="refresh_models_btn"):
+                get_available_models.clear()
+                st.success("모델 목록이 새로고침되었습니다!")
+        
+        # 현재 모델 상태 표시
+        if st.session_state.model_loaded:
+            st.success(f"✅ 현재 로드된 모델: {st.session_state.current_model_name}")
+        else:
+            st.warning("⚠️ 모델이 로드되지 않았습니다.")
+        
+        selected_models = [selected_model]
+        
+    else:
+        # 다중 모델 선택
+        st.markdown("**🔧 실험할 모델들을 선택하세요 (여러 개 선택 가능)**")
+        selected_models = st.multiselect(
+            "사용 가능한 모델들",
+            available_models,
+            default=[available_models[0]] if available_models else [],
+            help="여러 모델을 선택하면 순차적으로 처리됩니다."
+        )
+        
+        if selected_models:
+            st.info(f"선택된 모델: {', '.join(selected_models)}")
+            
+            # 모델별 상태 확인
+            st.markdown("**📊 모델 상태 확인**")
+            for model in selected_models:
+                # 간단한 상태 확인 (실제 로드하지 않고)
+                try:
+                    response = requests.post(
+                        f"http://localhost:11434/api/generate",
+                        json={
+                            "model": model,
+                            "prompt": "test",
+                            "stream": False
+                        },
+                        timeout=5
+                    )
+                    if response.status_code == 200:
+                        st.success(f"✅ {model} (사용 가능)")
                     else:
-                        st.error(f"❌ {selected_model} 모델 로드에 실패했습니다.")
-            else:
-                st.info("이미 로드된 모델입니다.")
-    
-    with col2:
-        if st.button("📤 모델 언로드", type="secondary", key="unload_model_btn"):
-            if st.session_state.model_loaded:
-                unload_model_from_session()
-                st.session_state.model_loaded = False
-                st.session_state.current_model_name = None
-                st.success("✅ 모델이 언로드되었습니다!")
-            else:
-                st.info("로드된 모델이 없습니다.")
-    
-    with col3:
-        if st.button("🔄 모델 목록 새로고침", type="secondary", key="refresh_models_btn"):
+                        st.warning(f"⚠️ {model} (응답 오류)")
+                except:
+                    st.warning(f"⚠️ {model} (연결 실패)")
+        else:
+            st.warning("⚠️ 최소 하나의 모델을 선택해주세요.")
+            selected_models = []
+        
+        # 모델 목록 새로고침 버튼
+        if st.button("🔄 모델 목록 새로고침", type="secondary", key="refresh_models_multi_btn"):
             get_available_models.clear()
             st.success("모델 목록이 새로고침되었습니다!")
-    
-    # 현재 모델 상태 표시
-    if st.session_state.model_loaded:
-        st.success(f"✅ 현재 로드된 모델: {st.session_state.current_model_name}")
-    else:
-        st.warning("⚠️ 모델이 로드되지 않았습니다.")
+            st.rerun()
     
     # 데이터셋 선택 섹션
     st.subheader("📊 Dataset Selection")
@@ -920,7 +1238,7 @@ def show():
     dataset_files = st.session_state.dataset_files_cache[cache_key]
     
     # 도메인별 데이터셋 파일 선택
-    domains = ["general", "technical", "legal", "medical"]
+    domains = ["economy", "technical", "legal", "medical"]
     selected_files = {}
     
     for domain in domains:
@@ -958,8 +1276,8 @@ def show():
     
     # 실험 실행 버튼
     if st.button("🚀 실험 시작", type="primary", key="start_experiment_btn"):
-        if not st.session_state.model_loaded:
-            st.error("모델을 먼저 로드해주세요.")
+        if not selected_models:
+            st.error("모델을 먼저 선택해주세요.")
             return
         
         if not selected_files:
@@ -968,37 +1286,95 @@ def show():
         
         # 실험 실행
         try:
-            if batch_mode:
-                results = batch_domain_experiment(selected_model, selected_files, num_prompts)
+            if experiment_mode == "단일 모델 실험":
+                # 단일 모델 실험
+                if not st.session_state.model_loaded:
+                    st.error("모델을 먼저 로드해주세요.")
+                    return
+                
+                if batch_mode:
+                    results = batch_domain_experiment(selected_models[0], selected_files, num_prompts)
+                    if results:
+                        save_experiment_result(results, selected_models[0])
+                        st.success(f"✅ 실험 완료! 총 {len(results)}개 결과")
+                    else:
+                        st.warning("⚠️ 실험 결과가 없습니다.")
+                else:
+                    st.info("단일 도메인 실험 모드는 준비 중입니다.")
+            else:
+                # 다중 모델 실험
+                st.info(f"🔄 {len(selected_models)}개 모델에 대해 실험을 시작합니다...")
+                results = batch_domain_experiment_multi_models(selected_models, selected_files, num_prompts)
                 if results:
-                    save_experiment_result(results, selected_model)
-                    st.success(f"✅ 실험 완료! 총 {len(results)}개 결과")
+                    st.success(f"✅ 모든 모델 실험 완료! 총 {len(results)}개 결과")
                 else:
                     st.warning("⚠️ 실험 결과가 없습니다.")
-            else:
-                st.info("단일 도메인 실험 모드는 준비 중입니다.")
         except Exception as e:
             st.error(f"❌ 실험 실행 중 오류 발생: {str(e)}")
     
     # 실험 결과 확인
     st.subheader("📋 Experiment Results")
     
-    # 실험 결과 파일 목록
-    experiment_results = list_model_experiment_results(selected_model)
-    
-    if experiment_results:
-        selected_result = st.selectbox(
-            "확인할 실험 결과를 선택하세요",
-            experiment_results,
-            key="result_selector"
-        )
+    if experiment_mode == "단일 모델 실험":
+        # 단일 모델 실험 결과
+        experiment_results = list_model_experiment_results(selected_models[0])
         
-        if selected_result:
-            result_data = load_model_experiment_result(selected_model, selected_result)
-            if result_data:
-                st.json(result_data)
+        if experiment_results:
+            selected_result = st.selectbox(
+                "확인할 실험 결과를 선택하세요",
+                experiment_results,
+                key="result_selector"
+            )
+            
+            if selected_result:
+                result_data = load_model_experiment_result(selected_models[0], selected_result)
+                if result_data:
+                    st.json(result_data)
+        else:
+            st.info("아직 실험 결과가 없습니다.")
     else:
-        st.info("아직 실험 결과가 없습니다.")
+        # 다중 모델 실험 결과
+        st.markdown("**📊 모든 모델의 실험 결과**")
+        
+        for model_name in selected_models:
+            with st.expander(f"📋 {model_name} 실험 결과", expanded=False):
+                experiment_results = list_model_experiment_results(model_name)
+                
+                if experiment_results:
+                    selected_result = st.selectbox(
+                        f"{model_name} 결과 선택",
+                        experiment_results,
+                        key=f"result_selector_{model_name}"
+                    )
+                    
+                    if selected_result:
+                        result_data = load_model_experiment_result(model_name, selected_result)
+                        if result_data:
+                            st.json(result_data)
+                else:
+                    st.info(f"{model_name}의 실험 결과가 없습니다.")
+        
+        # 전체 실험 결과 요약
+        st.markdown("**📈 전체 실험 결과 요약**")
+        all_experiments = get_all_model_experiments()
+        if all_experiments:
+            # 최근 실험 결과들 표시
+            recent_experiments = []
+            for model_name, experiments in all_experiments.items():
+                if experiments:
+                    recent_experiments.append({
+                        'model': model_name,
+                        'latest': experiments[0],  # 가장 최근 결과
+                        'count': len(experiments)
+                    })
+            
+            # 최근 실험 결과들을 테이블로 표시
+            if recent_experiments:
+                st.markdown("**최근 실험 결과**")
+                for exp in recent_experiments:
+                    st.info(f"**{exp['model']}**: {exp['count']}개 결과 (최근: {exp['latest']})")
+        else:
+            st.info("아직 실험 결과가 없습니다.")
     
     # 캐시 초기화 버튼 (디버깅용)
     if st.sidebar.button("🗑️ 캐시 초기화", help="모든 캐시를 초기화합니다", key="clear_cache_experiment"):

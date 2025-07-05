@@ -1,0 +1,5 @@
+{"prompt": "Question:", "model": "llama2:7b", "domain": "Legal", "index": 1}
+{"prompt": "Sure! Here is a new question or prompt related to the Legal domain:", "model": "llama2:7b", "domain": "Legal", "index": 2}
+{"prompt": "Question: What are the legal implications of a company's decision to adopt a hybrid work model, combining remote and in-office work, and how can they ensure compliance with labor laws and regulations?", "model": "llama2:7b", "domain": "Legal", "index": 3}
+{"prompt": "Question:", "model": "llama2:7b", "domain": "Legal", "index": 4}
+{"prompt": "What are the legal implications of using AI in autonomous vehicles?", "model": "llama2:7b", "domain": "Legal", "index": 5}

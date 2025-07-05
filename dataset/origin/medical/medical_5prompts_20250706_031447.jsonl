@@ -1,0 +1,5 @@
+{"prompt": "Within the context of oncology, identify the primary mechanism of action for carboplatin and explain its clinical significance in treating lung cancer.", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "In the context of primary care, describe the key clinical features and potential differential diagnoses for a patient presenting with persistent abdominal pain and nausea.", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "Within the context of oncology, identify the primary mechanisms of action for the most commonly prescribed immunotherapy drugs in treating melanoma.", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "**Describe the key clinical features and potential diagnostic implications of elevated liver enzymes in a patient with viral hepatitis.**", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "Within the context of oncology, identify the primary mechanism of action for the recently approved therapeutic antibody targeting PD-1 in melanoma patients.", "model": "llama2:7b", "domain": "Medical", "index": 5}

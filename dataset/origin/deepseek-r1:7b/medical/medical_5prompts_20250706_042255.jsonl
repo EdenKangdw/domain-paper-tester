@@ -1,0 +1,5 @@
+{"prompt": "Okay, so I need to generate a new question or prompt related to the Medical domain based on the user's instructions. Let me break this down.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
+{"prompt": "Okay, so I need to generate a new question or prompt related to the medical domain. The user provided some criteria: specific, clear, focused on extracting key info, natural, and professional. They also want it in just the prompt without extra stuff.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
+{"prompt": "Alright, I need to generate a new question or prompt for the Medical domain based on the user's criteria. Let me break down what they're asking for.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
+{"prompt": "Alright, I've got a user request here. They want me to generate a new question or prompt specifically related to the medical domain. Let's break down their requirements.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
+{"prompt": "What is the most effective method for managing Type 2 Diabetes Mellitus in Adults over", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

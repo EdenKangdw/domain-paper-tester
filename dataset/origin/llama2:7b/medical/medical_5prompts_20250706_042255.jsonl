@@ -1,0 +1,5 @@
+{"prompt": "What are the most common side effects of the new medication prescribed for hypertension, and how do they compare to other similar medications on the market?", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "What are the most common causes of chronic pain in older adults, and how do these causes differ from those in younger populations?", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "What are the most effective treatments for managing chronic lower back pain, and what factors should be considered when determining the best course of treatment?", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "What are the most effective treatment options for managing chronic lower back pain, and how do you determine which approach is best for each patient?", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "What are the most common complications associated with diabetes, and how can they be prevented or managed?", "model": "llama2:7b", "domain": "Medical", "index": 5}

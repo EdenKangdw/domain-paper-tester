@@ -27,7 +27,7 @@ MODEL_TOKENIZER_MAP = {
 
 # 도메인별 evidence 추출 프롬프트
 DOMAIN_PROMPTS = {
-    "general": "Find tokens related to general knowledge, facts, and information.",
+    "economy": "Find tokens related to economy, finance, market, investment, currency, and trade.",
     "legal": "Find tokens related to law, regulations, contracts, rights, and obligations.",
     "medical": "Find tokens related to medicine, health, disease, treatment, and drugs.",
     "technical": "Find tokens related to technology, science, engineering, computers, and systems."
@@ -238,7 +238,19 @@ def call_ollama_api(model_key: str, prompt: str) -> Optional[str]:
         if response.status_code == 200:
             result = response.json()
             response_text = result.get("response", "").strip()
-            print(f"   ✅ API 호출 성공: {len(response_text)} 문자 응답")
+            
+            # deepseek 모델의 <think> 태그 제거
+            if "deepseek" in model_key.lower():
+                import re
+                # <think>...</think> 태그와 내용 제거
+                response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+                # <think> 태그만 있는 경우 제거
+                response_text = re.sub(r'<think>\s*</think>', '', response_text)
+                response_text = response_text.strip()
+                print(f"   ✅ API 호출 성공 (deepseek 태그 제거): {len(response_text)} 문자 응답")
+            else:
+                print(f"   ✅ API 호출 성공: {len(response_text)} 문자 응답")
+            
             return response_text
         else:
             print(f"❌ Ollama API 오류: {response.status_code}")
@@ -416,8 +428,62 @@ def load_tokenizer_cached(tokenizer_name: str):
             print(f"   ❌ 토크나이저 로드 최종 실패: {str(e2)}")
             raise e2
 
+def process_single_prompt_multi_models(prompt_data: Dict[str, Any], model_keys: List[str], domain: str) -> List[Dict[str, Any]]:
+    """단일 프롬프트를 여러 모델로 처리합니다."""
+    results = []
+    
+    for model_key in model_keys:
+        try:
+            print(f"🔍 프롬프트 처리 시작: {domain} 도메인, {model_key} 모델")
+            print(f"   프롬프트 길이: {len(prompt_data['prompt'])} 문자")
+            print(f"   프롬프트 미리보기: {prompt_data['prompt'][:100]}...")
+            
+            # 토크나이저 이름 확인
+            tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
+            if not tokenizer_name:
+                print(f"   ⚠️ Tokenizer not found for model {model_key}")
+                continue
+            
+            # 토크나이저 로드
+            tokenizer = load_tokenizer_cached(tokenizer_name)
+            tokens = tokenizer.tokenize(prompt_data["prompt"])
+            print(f"   토크나이징 완료: {len(tokens)}개 토큰")
+            
+            # Evidence 추출
+            print(f"   Evidence 추출 시작...")
+            evidence_indices, evidence_tokens = extract_evidence_tokens(prompt_data["prompt"], model_key, domain)
+            print(f"   Evidence 추출 결과: {len(evidence_indices)}개 인덱스, {len(evidence_tokens)}개 토큰")
+            
+            # Evidence 추출 결과 확인
+            if not evidence_tokens:
+                print(f"   ⚠️ No evidence tokens extracted for prompt: {prompt_data['prompt'][:50]}...")
+                continue
+            
+            # response 필드 제거하고 필요한 필드만 포함
+            cleaned_data = {
+                "prompt": prompt_data["prompt"],
+                "domain": prompt_data.get("domain", domain),
+                "model": model_key,
+                "index": prompt_data.get("index", 0),
+                "evidence_indices": evidence_indices,
+                "evidence_tokens": evidence_tokens,
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
+            }
+            
+            results.append(cleaned_data)
+            print(f"   ✅ 프롬프트 처리 완료: {domain} 도메인, {model_key} 모델, {len(evidence_tokens)}개 evidence 토큰")
+            
+        except Exception as e:
+            print(f"   ❌ 프롬프트 처리 중 오류 ({model_key}): {str(e)}")
+            print(f"   Prompt: {prompt_data.get('prompt', '')[:50]}...")
+            print(f"   Domain: {domain}")
+            print(f"   Model: {model_key}")
+            continue
+    
+    return results
+
 def process_single_prompt(prompt_data: Dict[str, Any], model_key: str, domain: str, tokenizer_name: str) -> Dict[str, Any]:
-    """단일 프롬프트를 처리합니다."""
+    """단일 프롬프트를 처리합니다. (단일 모델용 - 호환성 유지)"""
     try:
         prompt = prompt_data["prompt"]
         print(f"🔍 프롬프트 처리 시작: {domain} 도메인")
@@ -534,6 +600,13 @@ def show():
     st.markdown("---")
     st.markdown("## 🤖 Model Configuration")
     
+    # 실험 모드 선택
+    experiment_mode = st.radio(
+        "Evidence 추출 모드를 선택하세요",
+        ["단일 모델 추출", "다중 모델 추출"],
+        key="evidence_mode_selector"
+    )
+    
     # 모델 선택
     col1, col2 = st.columns([2, 1])
     
@@ -543,17 +616,29 @@ def show():
             st.error("❌ Ollama 서버에 연결할 수 없습니다. Ollama가 실행 중인지 확인해주세요.")
             return
         
-        model_key = st.selectbox(
-            "모델 선택",
-            available_models,
-            index=0 if available_models else None,
-            help="Evidence 추출에 사용할 모델을 선택하세요."
-        )
+        if experiment_mode == "단일 모델 추출":
+            model_key = st.selectbox(
+                "모델 선택",
+                available_models,
+                index=0 if available_models else None,
+                help="Evidence 추출에 사용할 모델을 선택하세요."
+            )
+            selected_models = [model_key]
+        else:
+            st.markdown("**🔧 추출할 모델들을 선택하세요 (여러 개 선택 가능)**")
+            selected_models = st.multiselect(
+                "사용 가능한 모델들",
+                available_models,
+                default=[available_models[0]] if available_models else [],
+                help="여러 모델을 선택하면 순차적으로 처리됩니다."
+            )
+            model_key = selected_models[0] if selected_models else None
     
     with col2:
         if st.button("🔄 모델 목록 새로고침", key="refresh_models_evidence"):
             get_available_models.clear()
             st.success("모델 목록이 새로고침되었습니다!")
+            st.rerun()
     
     # 모델 실행 상태 확인
     st.markdown("### 🔍 Model Status Check")
@@ -572,41 +657,48 @@ def show():
         else:
             st.warning("⚪ 실행 중인 모델이 없습니다.")
     
-    # 선택된 모델 상태 확인
-    if model_key:
-        is_running = model_key in running_models
-        is_available = check_model_status(model_key)
+    # 선택된 모델들 상태 확인
+    if selected_models:
+        st.markdown("**📊 선택된 모델 상태 확인**")
         
-        col_status3, col_status4 = st.columns(2)
+        for model in selected_models:
+            is_running = model in running_models
+            is_available = check_model_status(model)
+            
+            col_status3, col_status4 = st.columns(2)
+            
+            with col_status3:
+                if is_running:
+                    st.success(f"✅ {model} - 실행 중")
+                elif is_available:
+                    st.info(f"ℹ️ {model} - 사용 가능 (로드 필요)")
+                else:
+                    st.error(f"❌ {model} - 사용 불가")
+            
+            with col_status4:
+                # 토크나이저 이름 확인
+                tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
+                if tokenizer_name:
+                    st.success(f"🔧 {model} - 토크나이저 지원")
+                else:
+                    st.warning(f"⚠️ {model} - 토크나이저 없음")
         
-        with col_status3:
-            if is_running:
-                st.success(f"✅ {model_key} - 실행 중")
-            elif is_available:
-                st.info(f"ℹ️ {model_key} - 사용 가능 (로드 필요)")
-            else:
-                st.error(f"❌ {model_key} - 사용 불가")
+        # 모든 모델이 사용 가능한지 확인
+        all_available = all(check_model_status(model) for model in selected_models)
+        if not all_available:
+            st.warning("⚠️ 일부 모델을 먼저 로드해주세요.")
+            st.markdown("""
+            **해결 방법:**
+            1. Model Loader 탭으로 이동
+            2. 모델을 선택하고 "🚀 Start Model" 클릭
+            3. 또는 터미널에서: `ollama run {model_key}`
+            """)
+            return
         
-        with col_status4:
-            if not is_available:
-                st.warning("⚠️ 모델을 먼저 로드해주세요.")
-                st.markdown("""
-                **해결 방법:**
-                1. Model Loader 탭으로 이동
-                2. 모델을 선택하고 "🚀 Start Model" 클릭
-                3. 또는 터미널에서: `ollama run {model_key}`
-                """)
-                return
-    
-    # 토크나이저 이름 확인
-    tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
-    st.write(f"model_key : {model_key}")
-    st.write(f"tokenizer_name : {tokenizer_name}")
-    if not tokenizer_name:
-        st.error(f"❌ Tokenizer not found for model {model_key}")
+        st.success(f"✅ {len(selected_models)}개 모델 설정이 완료되었습니다!")
+    else:
+        st.warning("⚠️ 최소 하나의 모델을 선택해주세요.")
         return
-    
-    st.success("✅ 모델 설정이 완료되었습니다!")
     
     # ===== 섹션 2: 도메인 선택 =====
     st.markdown("---")
@@ -665,47 +757,105 @@ def show():
         if preview_prompts:
             preview_index = st.slider("미리보기할 프롬프트 인덱스", 0, min(len(preview_prompts)-1, 10), 0)
             
-            if st.button("🔍 미리보기 실행", key="preview_evidence"):
-                with st.spinner("미리보기 중..."):
-                    preview_prompt_data = preview_prompts[preview_index]
-                    preview_prompt = preview_prompt_data["prompt"]
-                    
-                    # 토크나이징
-                    tokenizer = load_tokenizer_cached(tokenizer_name)
-                    tokens = tokenizer.tokenize(preview_prompt)
-                    
-                    # Evidence 추출
-                    evidence_indices, evidence_tokens = extract_evidence_tokens(
-                        preview_prompt, model_key, preview_domain
-                    )
-                    
-                    # 결과 표시
-                    st.markdown("### 📋 Preview Results")
-                    
-                    col7, col8 = st.columns(2)
-                    with col7:
-                        st.write("**원본 프롬프트:**")
-                        st.text_area("", preview_prompt, height=100, key="preview_prompt")
+            if experiment_mode == "단일 모델 추출":
+                # 단일 모델 미리보기
+                if st.button("🔍 미리보기 실행", key="preview_evidence"):
+                    with st.spinner("미리보기 중..."):
+                        preview_prompt_data = preview_prompts[preview_index]
+                        preview_prompt = preview_prompt_data["prompt"]
                         
-                        st.write("**토크나이징 결과 (참고용):**")
-                        st.write(f"총 {len(tokens)}개 토큰")
-                        st.text_area("", str(tokens[:20]) + "..." if len(tokens) > 20 else str(tokens), height=100, key="preview_tokens")
-                    
-                    with col8:
-                        st.write("**추출된 Evidence 토큰:**")
-                        st.write(f"총 {len(evidence_tokens)}개 토큰")
-                        st.text_area("", str(evidence_tokens), height=100, key="preview_evidence_tokens")
+                        # 토크나이징
+                        tokenizer = load_tokenizer_cached(tokenizer_name)
+                        tokens = tokenizer.tokenize(preview_prompt)
                         
-                        st.write("**Evidence 토큰 위치 (원본 프롬프트 기준):**")
-                        st.write(f"총 {len(evidence_indices)}개 위치")
-                        st.text_area("", str(evidence_indices), height=100, key="preview_evidence_indices")
-                    
-                    # 디버깅 정보 추가
-                    st.markdown("### 🔍 Debug Information")
-                    
-                    # LLM 응답 확인
-                    domain_instruction = DOMAIN_PROMPTS.get(preview_domain.lower(), "Find important tokens related to the domain.")
-                    debug_prompt = f"""
+                        # Evidence 추출
+                        evidence_indices, evidence_tokens = extract_evidence_tokens(
+                            preview_prompt, model_key, preview_domain
+                        )
+            else:
+                # 다중 모델 미리보기
+                preview_models = st.multiselect(
+                    "미리보기할 모델 선택",
+                    selected_models,
+                    default=selected_models[:2] if len(selected_models) >= 2 else selected_models,
+                    help="미리보기할 모델들을 선택하세요."
+                )
+                
+                if st.button("🔍 다중 모델 미리보기 실행", key="preview_evidence_multi"):
+                    with st.spinner("다중 모델 미리보기 중..."):
+                        preview_prompt_data = preview_prompts[preview_index]
+                        preview_prompt = preview_prompt_data["prompt"]
+                        
+                        # 다중 모델로 처리
+                        processed_items = process_single_prompt_multi_models(
+                            preview_prompt_data, preview_models, preview_domain
+                        )
+                        
+                        if processed_items:
+                            st.markdown("### 📋 Multi-Model Preview Results")
+                            
+                            for item in processed_items:
+                                model_name = item['model']
+                                evidence_tokens = item['evidence_tokens']
+                                evidence_indices = item['evidence_indices']
+                                
+                                st.markdown(f"**🔧 {model_name} 모델 결과:**")
+                                
+                                col7, col8 = st.columns(2)
+                                with col7:
+                                    st.write(f"**추출된 Evidence 토큰 ({len(evidence_tokens)}개):**")
+                                    st.text_area("", str(evidence_tokens), height=100, key=f"preview_evidence_tokens_{model_name}")
+                                
+                                with col8:
+                                    st.write(f"**Evidence 토큰 위치 ({len(evidence_indices)}개):**")
+                                    st.text_area("", str(evidence_indices), height=100, key=f"preview_evidence_indices_{model_name}")
+                                
+                                st.markdown("---")
+                        
+                        # 원본 프롬프트 표시
+                        st.markdown("### 📄 Original Prompt")
+                        st.text_area("", preview_prompt, height=100, key="preview_prompt_multi")
+                        
+                        # 토크나이징 결과 (첫 번째 모델 기준)
+                        if preview_models:
+                            first_model = preview_models[0]
+                            tokenizer_name = MODEL_TOKENIZER_MAP.get(first_model)
+                            if tokenizer_name:
+                                tokenizer = load_tokenizer_cached(tokenizer_name)
+                                tokens = tokenizer.tokenize(preview_prompt)
+                                st.write(f"**토크나이징 결과 (참고용, {first_model} 기준):**")
+                                st.write(f"총 {len(tokens)}개 토큰")
+                                st.text_area("", str(tokens[:20]) + "..." if len(tokens) > 20 else str(tokens), height=100, key="preview_tokens_multi")
+        
+        # 단일 모델 미리보기 결과 표시
+        if experiment_mode == "단일 모델 추출" and 'preview_prompt' in locals():
+            # 결과 표시
+            st.markdown("### 📋 Preview Results")
+            
+            col7, col8 = st.columns(2)
+            with col7:
+                st.write("**원본 프롬프트:**")
+                st.text_area("", preview_prompt, height=100, key="preview_prompt")
+                
+                st.write("**토크나이징 결과 (참고용):**")
+                st.write(f"총 {len(tokens)}개 토큰")
+                st.text_area("", str(tokens[:20]) + "..." if len(tokens) > 20 else str(tokens), height=100, key="preview_tokens")
+            
+            with col8:
+                st.write("**추출된 Evidence 토큰:**")
+                st.write(f"총 {len(evidence_tokens)}개 토큰")
+                st.text_area("", str(evidence_tokens), height=100, key="preview_evidence_tokens")
+                
+                st.write("**Evidence 토큰 위치 (원본 프롬프트 기준):**")
+                st.write(f"총 {len(evidence_indices)}개 위치")
+                st.text_area("", str(evidence_indices), height=100, key="preview_evidence_indices")
+                
+                # 디버깅 정보 추가
+                st.markdown("### 🔍 Debug Information")
+                
+                # LLM 응답 확인
+                domain_instruction = DOMAIN_PROMPTS.get(preview_domain.lower(), "Find important tokens related to the domain.")
+                debug_prompt = f"""
 You are an English-only evidence extraction system. Your task is to extract English tokens from the given prompt.
 
 DOMAIN: {preview_domain}
@@ -730,86 +880,86 @@ EXAMPLES:
 RESPONSE FORMAT (JSON array only):
 ["word1", "word2", "word3"]
 """
+                
+                debug_response = call_ollama_api(model_key, debug_prompt)
+                
+                col9, col10 = st.columns(2)
+                with col9:
+                    st.write("**LLM 응답 (원본):**")
+                    st.text_area("", debug_response or "No response", height=150, key="debug_response")
                     
-                    debug_response = call_ollama_api(model_key, debug_prompt)
+                    st.write("**추출된 토큰 (파싱 후):**")
+                    parsed_tokens = extract_tokens_from_response(debug_response) if debug_response else []
+                    st.text_area("", str(parsed_tokens), height=100, key="debug_parsed_tokens")
+                
+                with col10:
+                    st.write("**토큰 매칭 결과:**")
+                    prompt_lower = preview_prompt.lower()
+                    matching_info = []
+                    for token in parsed_tokens or []:
+                        token_lower = token.lower().strip()
+                        is_in_prompt = token_lower in prompt_lower
+                        import re
+                        pattern = r'\b' + re.escape(token_lower) + r'\b'
+                        is_word_boundary = bool(re.search(pattern, prompt_lower))
+                        matching_info.append(f"'{token}': in_prompt={is_in_prompt}, word_boundary={is_word_boundary}")
                     
-                    col9, col10 = st.columns(2)
-                    with col9:
-                        st.write("**LLM 응답 (원본):**")
-                        st.text_area("", debug_response or "No response", height=150, key="debug_response")
-                        
-                        st.write("**추출된 토큰 (파싱 후):**")
-                        parsed_tokens = extract_tokens_from_response(debug_response) if debug_response else []
-                        st.text_area("", str(parsed_tokens), height=100, key="debug_parsed_tokens")
+                    st.text_area("", "\n".join(matching_info), height=150, key="debug_matching")
+                
+                # 인덱스 계산 디버깅 정보 추가
+                st.markdown("### 🔍 Index Calculation Debug")
+                
+                col11, col12 = st.columns(2)
+                with col11:
+                    st.write("**토큰화 결과 (인덱스 표시):**")
+                    tokenized = tokenizer.tokenize(preview_prompt)
+                    indexed_tokens = ""
+                    for i, token in enumerate(tokenized):
+                        if i % 5 == 0:
+                            indexed_tokens += f"\n{i:3d}: "
+                        indexed_tokens += f"{token} "
+                    st.text_area("", indexed_tokens, height=200, key="indexed_tokens")
+                
+                with col12:
+                    st.write("**Evidence 토큰 위치 확인 (토큰 단위):**")
+                    position_info = []
                     
-                    with col10:
-                        st.write("**토큰 매칭 결과:**")
-                        prompt_lower = preview_prompt.lower()
-                        matching_info = []
-                        for token in parsed_tokens or []:
-                            token_lower = token.lower().strip()
-                            is_in_prompt = token_lower in prompt_lower
-                            import re
-                            pattern = r'\b' + re.escape(token_lower) + r'\b'
-                            is_word_boundary = bool(re.search(pattern, prompt_lower))
-                            matching_info.append(f"'{token}': in_prompt={is_in_prompt}, word_boundary={is_word_boundary}")
-                        
-                        st.text_area("", "\n".join(matching_info), height=150, key="debug_matching")
+                    # 원본 evidence 토큰과 인덱스 매칭
+                    original_tokens = extract_tokens_from_response(debug_response) if debug_response else []
+                    english_tokens = []
+                    for token in original_tokens or []:
+                        token_clean = token.lower().strip()
+                        if token_clean and all(c.isascii() and c.isalnum() or c.isspace() for c in token_clean):
+                            english_tokens.append(token_clean)
                     
-                    # 인덱스 계산 디버깅 정보 추가
-                    st.markdown("### 🔍 Index Calculation Debug")
+                    # 각 토큰에 대한 인덱스 찾기
+                    all_indices = find_token_positions(preview_prompt, english_tokens, tokenizer)
                     
-                    col11, col12 = st.columns(2)
-                    with col11:
-                        st.write("**토큰화 결과 (인덱스 표시):**")
-                        tokenized = tokenizer.tokenize(preview_prompt)
-                        indexed_tokens = ""
-                        for i, token in enumerate(tokenized):
-                            if i % 5 == 0:
-                                indexed_tokens += f"\n{i:3d}: "
-                            indexed_tokens += f"{token} "
-                        st.text_area("", indexed_tokens, height=200, key="indexed_tokens")
+                    for i, (token, idx) in enumerate(zip(english_tokens, all_indices)):
+                        if idx != -1 and idx < len(tokenized):
+                            actual_token = tokenized[idx]
+                            # Ġ 문자 제거하여 표시
+                            clean_actual_token = actual_token.replace('Ġ', '')
+                            position_info.append(f"'{token}' at token pos {idx}: '{clean_actual_token}' ✅")
+                        elif idx == -1:
+                            position_info.append(f"'{token}': not found in tokens ❌")
+                        else:
+                            position_info.append(f"'{token}' at token pos {idx}: index out of range ❌")
                     
-                    with col12:
-                        st.write("**Evidence 토큰 위치 확인 (토큰 단위):**")
-                        position_info = []
-                        
-                        # 원본 evidence 토큰과 인덱스 매칭
-                        original_tokens = extract_tokens_from_response(debug_response) if debug_response else []
-                        english_tokens = []
-                        for token in original_tokens or []:
-                            token_clean = token.lower().strip()
-                            if token_clean and all(c.isascii() and c.isalnum() or c.isspace() for c in token_clean):
-                                english_tokens.append(token_clean)
-                        
-                        # 각 토큰에 대한 인덱스 찾기
-                        all_indices = find_token_positions(preview_prompt, english_tokens, tokenizer)
-                        
-                        for i, (token, idx) in enumerate(zip(english_tokens, all_indices)):
-                            if idx != -1 and idx < len(tokenized):
-                                actual_token = tokenized[idx]
-                                # Ġ 문자 제거하여 표시
-                                clean_actual_token = actual_token.replace('Ġ', '')
-                                position_info.append(f"'{token}' at token pos {idx}: '{clean_actual_token}' ✅")
-                            elif idx == -1:
-                                position_info.append(f"'{token}': not found in tokens ❌")
-                            else:
-                                position_info.append(f"'{token}' at token pos {idx}: index out of range ❌")
-                        
-                        st.text_area("", "\n".join(position_info), height=200, key="position_info")
-                    
-                    # 최종 데이터셋 항목 미리보기
-                    st.markdown("### 📊 Final Dataset Item Preview")
-                    final_item = {
-                        "prompt": preview_prompt_data["prompt"],
-                        "domain": preview_prompt_data.get("domain", preview_domain),
-                        "model": model_key,
-                        "index": preview_prompt_data.get("index", preview_index),
-                        "evidence_indices": evidence_indices,
-                        "evidence_tokens": evidence_tokens,
-                        "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
-                    }
-                    st.json(final_item)
+                    st.text_area("", "\n".join(position_info), height=200, key="position_info")
+                
+                # 최종 데이터셋 항목 미리보기
+                st.markdown("### 📊 Final Dataset Item Preview")
+                final_item = {
+                    "prompt": preview_prompt_data["prompt"],
+                    "domain": preview_prompt_data.get("domain", preview_domain),
+                    "model": model_key,
+                    "index": preview_prompt_data.get("index", preview_index),
+                    "evidence_indices": evidence_indices,
+                    "evidence_tokens": evidence_tokens,
+                    "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
+                }
+                st.json(final_item)
         else:
             st.warning(f"⚠️ {preview_domain} 도메인에 프롬프트가 없습니다.")
     
@@ -861,23 +1011,40 @@ RESPONSE FORMAT (JSON array only):
             st.markdown("### 🔍 Pre-Extraction Check")
             
             # 1. 모델 상태 확인
-            is_model_running = model_key in get_running_models()
-            if is_model_running:
-                st.success(f"✅ 모델 {model_key} 실행 중")
+            if experiment_mode == "단일 모델 추출":
+                # 단일 모델 체크
+                is_model_running = model_key in get_running_models()
+                if is_model_running:
+                    st.success(f"✅ 모델 {model_key} 실행 중")
+                else:
+                    st.error(f"❌ 모델 {model_key} 실행되지 않음")
+                    st.warning("💡 Model Loader 탭에서 모델을 먼저 실행해주세요.")
+                    return
+                
+                # 토크나이저 확인
+                tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
+                if tokenizer_name:
+                    st.success(f"✅ 토크나이저: {tokenizer_name}")
+                else:
+                    st.error(f"❌ 토크나이저를 찾을 수 없음: {model_key}")
+                    return
             else:
-                st.error(f"❌ 모델 {model_key} 실행되지 않음")
-                st.warning("💡 Model Loader 탭에서 모델을 먼저 실행해주세요.")
-                return
+                # 다중 모델 체크
+                for model in selected_models:
+                    is_model_running = model in get_running_models()
+                    if is_model_running:
+                        st.success(f"✅ 모델 {model} 실행 중")
+                    else:
+                        st.warning(f"⚠️ 모델 {model} 실행되지 않음 (자동 로드 시도)")
+                    
+                    # 토크나이저 확인
+                    tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
+                    if tokenizer_name:
+                        st.success(f"✅ {model} 토크나이저: {tokenizer_name}")
+                    else:
+                        st.warning(f"⚠️ {model} 토크나이저 없음")
             
-            # 2. 토크나이저 확인
-            tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
-            if tokenizer_name:
-                st.success(f"✅ 토크나이저: {tokenizer_name}")
-            else:
-                st.error(f"❌ 토크나이저를 찾을 수 없음: {model_key}")
-                return
-            
-            # 3. 도메인별 프롬프트 확인
+            # 2. 도메인별 프롬프트 확인
             for domain in selected_domains:
                 prompts = load_origin_prompts(domain)
                 if prompts:
@@ -900,6 +1067,10 @@ RESPONSE FORMAT (JSON array only):
             # 최종 데이터셋을 저장할 리스트
             final_datasets = []
             
+            # 전체 작업량 계산
+            total_tasks = len(selected_domains) * len(selected_models)
+            completed_tasks = 0
+            
             for domain_idx, domain in enumerate(selected_domains, 1):
                 # 도메인별 시작 시간 기록
                 domain_start_time = time.time()
@@ -915,52 +1086,103 @@ RESPONSE FORMAT (JSON array only):
                     prompts = prompts[:5]
                     st.info(f"🧪 테스트 모드: {domain} 도메인에서 처음 5개 프롬프트만 처리합니다.")
                 
-                progress_text.text(f"Extracting evidence from {domain} domain prompts...")
-                
-                with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain ({domain_idx}/{len(selected_domains)})..."):
-                    for i, prompt_data in enumerate(prompts):
-                        # 진행상황 카운터 업데이트
-                        progress_counter.text(f"{domain} domain: {i+1}/{len(prompts)}")
-                        
-                        # 시간 정보 업데이트
-                        current_time = time.time()
-                        elapsed_time = current_time - total_start_time
-                        
-                        # 예상 시간 계산
-                        total_prompts_to_process = sum(len(load_origin_prompts(d)) for d in selected_domains)
-                        completed_prompts = sum(len(load_origin_prompts(d)) for d in selected_domains[:domain_idx-1]) + i
-                        if completed_prompts > 0:
-                            avg_time_per_prompt = elapsed_time / completed_prompts
-                            remaining_prompts = total_prompts_to_process - completed_prompts
-                            estimated_remaining_time = avg_time_per_prompt * remaining_prompts
-                            estimated_total_time = elapsed_time + estimated_remaining_time
+                if experiment_mode == "단일 모델 추출":
+                    # 단일 모델 처리
+                    progress_text.text(f"Extracting evidence from {domain} domain prompts using {model_key}...")
+                    
+                    with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain using {model_key} ({domain_idx}/{len(selected_domains)})..."):
+                        for i, prompt_data in enumerate(prompts):
+                            # 진행상황 카운터 업데이트
+                            progress_counter.text(f"{domain} domain: {i+1}/{len(prompts)}")
                             
-                            time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
-                        else:
-                            time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
+                            # 시간 정보 업데이트
+                            current_time = time.time()
+                            elapsed_time = current_time - total_start_time
+                            
+                            # 예상 시간 계산
+                            total_prompts_to_process = sum(len(load_origin_prompts(d)) for d in selected_domains)
+                            completed_prompts = sum(len(load_origin_prompts(d)) for d in selected_domains[:domain_idx-1]) + i
+                            if completed_prompts > 0:
+                                avg_time_per_prompt = elapsed_time / completed_prompts
+                                remaining_prompts = total_prompts_to_process - completed_prompts
+                                estimated_remaining_time = avg_time_per_prompt * remaining_prompts
+                                estimated_total_time = elapsed_time + estimated_remaining_time
+                                
+                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
+                            else:
+                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
+                            
+                            # 단일 프롬프트 처리
+                            processed_item = process_single_prompt(prompt_data, model_key, domain, tokenizer_name)
+                            if processed_item:
+                                final_datasets.append(processed_item)
+                                # 디버깅: 성공한 경우 로그
+                                if (i + 1) % 10 == 0:
+                                    print(f"✅ Processed {i+1}/{len(prompts)} prompts in {domain} domain - Evidence tokens: {len(processed_item.get('evidence_tokens', []))}")
+                            else:
+                                # 디버깅: 실패한 경우 상세 로그
+                                print(f"❌ Failed to process prompt {i+1} in {domain} domain")
+                                if i < 3:  # 처음 3개만 상세 로그
+                                    print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
+                                    print(f"   Domain: {domain}")
+                                    print(f"   Model: {model_key}")
+                                    print(f"   Tokenizer: {tokenizer_name}")
+                                if (i + 1) % 10 == 0:
+                                    print(f"❌ Failed {i+1}/{len(prompts)} prompts in {domain} domain")
                         
-                        # 단일 프롬프트 처리
-                        processed_item = process_single_prompt(prompt_data, model_key, domain, tokenizer_name)
-                        if processed_item:
-                            final_datasets.append(processed_item)
-                            # 디버깅: 성공한 경우 로그
-                            if (i + 1) % 10 == 0:
-                                print(f"✅ Processed {i+1}/{len(prompts)} prompts in {domain} domain - Evidence tokens: {len(processed_item.get('evidence_tokens', []))}")
-                        else:
-                            # 디버깅: 실패한 경우 상세 로그
-                            print(f"❌ Failed to process prompt {i+1} in {domain} domain")
-                            if i < 3:  # 처음 3개만 상세 로그
-                                print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
-                                print(f"   Domain: {domain}")
-                                print(f"   Model: {model_key}")
-                                print(f"   Tokenizer: {tokenizer_name}")
-                            if (i + 1) % 10 == 0:
-                                print(f"❌ Failed {i+1}/{len(prompts)} prompts in {domain} domain")
+                        # 도메인별 완료 시간 계산
+                        domain_end_time = time.time()
+                        domain_duration = domain_end_time - domain_start_time
+                        print(f"{domain} domain evidence extraction completed in {domain_duration:.2f} seconds")
+                
+                else:
+                    # 다중 모델 처리
+                    progress_text.text(f"Extracting evidence from {domain} domain prompts using {len(selected_models)} models...")
+                    
+                    with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain using {len(selected_models)} models ({domain_idx}/{len(selected_domains)})..."):
+                        for i, prompt_data in enumerate(prompts):
+                            # 진행상황 카운터 업데이트
+                            progress_counter.text(f"{domain} domain: {i+1}/{len(prompts)} (모델: {len(selected_models)}개)")
+                            
+                            # 시간 정보 업데이트
+                            current_time = time.time()
+                            elapsed_time = current_time - total_start_time
+                            
+                            # 예상 시간 계산 (모델 수를 고려)
+                            total_prompts_to_process = sum(len(load_origin_prompts(d)) for d in selected_domains) * len(selected_models)
+                            completed_prompts = (sum(len(load_origin_prompts(d)) for d in selected_domains[:domain_idx-1]) + i) * len(selected_models)
+                            if completed_prompts > 0:
+                                avg_time_per_prompt = elapsed_time / completed_prompts
+                                remaining_prompts = total_prompts_to_process - completed_prompts
+                                estimated_remaining_time = avg_time_per_prompt * remaining_prompts
+                                estimated_total_time = elapsed_time + estimated_remaining_time
+                                
+                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
+                            else:
+                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
+                            
+                            # 다중 모델로 프롬프트 처리
+                            processed_items = process_single_prompt_multi_models(prompt_data, selected_models, domain)
+                            if processed_items:
+                                final_datasets.extend(processed_items)
+                                # 디버깅: 성공한 경우 로그
+                                if (i + 1) % 10 == 0:
+                                    total_evidence = sum(len(item.get('evidence_tokens', [])) for item in processed_items)
+                                    print(f"✅ Processed {i+1}/{len(prompts)} prompts in {domain} domain with {len(selected_models)} models - Total evidence tokens: {total_evidence}")
+                            else:
+                                # 디버깅: 실패한 경우 상세 로그
+                                print(f"❌ Failed to process prompt {i+1} in {domain} domain with all models")
+                                if i < 3:  # 처음 3개만 상세 로그
+                                    print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
+                                    print(f"   Domain: {domain}")
+                                    print(f"   Models: {selected_models}")
+                                if (i + 1) % 10 == 0:
+                                    print(f"❌ Failed {i+1}/{len(prompts)} prompts in {domain} domain")
                         
-                    # 도메인별 완료 시간 계산
-                    domain_end_time = time.time()
-                    domain_duration = domain_end_time - domain_start_time
-                    print(f"{domain} domain evidence extraction completed in {domain_duration:.2f} seconds")
+                        # 도메인별 완료 시간 계산
+                        domain_end_time = time.time()
+                        domain_duration = domain_end_time - domain_start_time
+                        print(f"{domain} domain evidence extraction completed in {domain_duration:.2f} seconds")
             
             # 전체 완료 시간 계산
             total_end_time = time.time()
@@ -1023,27 +1245,54 @@ RESPONSE FORMAT (JSON array only):
             
             print(f"💾 저장 시작 - 타임스탬프: {timestamp}")
             
-            for domain in selected_domains:
-                # 도메인별 데이터 필터링 (대소문자 구분 없이)
-                domain_data = [item for item in final_datasets if item["domain"].lower() == domain.lower()]
-                
-                st.info(f"📋 {domain} 도메인 데이터: {len(domain_data)}개")
-                print(f"📋 {domain} 도메인 저장 준비: {len(domain_data)}개 데이터")
-                
-                if domain_data:
-                    output_path, count = save_domain_data(domain, domain_data, model_key, timestamp)
-                    if output_path:
-                        saved_files.append((domain, output_path, count))
-                        st.success(f"✅ {domain} 도메인 파일 저장 완료: {output_path}")
-                        print(f"✅ {domain} 도메인 저장 성공: {output_path} ({count}개)")
+            if experiment_mode == "단일 모델 추출":
+                # 단일 모델 저장
+                for domain in selected_domains:
+                    # 도메인별 데이터 필터링 (대소문자 구분 없이)
+                    domain_data = [item for item in final_datasets if item["domain"].lower() == domain.lower()]
+                    
+                    st.info(f"📋 {domain} 도메인 데이터: {len(domain_data)}개")
+                    print(f"📋 {domain} 도메인 저장 준비: {len(domain_data)}개 데이터")
+                    
+                    if domain_data:
+                        output_path, count = save_domain_data(domain, domain_data, model_key, timestamp)
+                        if output_path:
+                            saved_files.append((domain, output_path, count))
+                            st.success(f"✅ {domain} 도메인 파일 저장 완료: {output_path}")
+                            print(f"✅ {domain} 도메인 저장 성공: {output_path} ({count}개)")
+                        else:
+                            st.error(f"❌ {domain} 도메인 파일 저장 실패")
+                            print(f"❌ {domain} 도메인 저장 실패")
                     else:
-                        st.error(f"❌ {domain} 도메인 파일 저장 실패")
-                        print(f"❌ {domain} 도메인 저장 실패")
-                else:
-                    st.warning(f"⚠️ {domain} 도메인에 저장할 데이터가 없습니다.")
-                    print(f"⚠️ {domain} 도메인: 저장할 데이터 없음")
-                    st.info(f"💡 원인: evidence 추출 과정에서 모든 프롬프트가 실패했을 수 있습니다.")
-                    st.info(f"💡 해결: 미리보기 기능으로 개별 프롬프트를 테스트해보세요.")
+                        st.warning(f"⚠️ {domain} 도메인에 저장할 데이터가 없습니다.")
+                        print(f"⚠️ {domain} 도메인: 저장할 데이터 없음")
+                        st.info(f"💡 원인: evidence 추출 과정에서 모든 프롬프트가 실패했을 수 있습니다.")
+                        st.info(f"💡 해결: 미리보기 기능으로 개별 프롬프트를 테스트해보세요.")
+            else:
+                # 다중 모델 저장 - 모델별로 분리하여 저장
+                for model in selected_models:
+                    st.markdown(f"**📊 {model} 모델 결과 저장**")
+                    
+                    for domain in selected_domains:
+                        # 모델과 도메인별 데이터 필터링
+                        domain_data = [item for item in final_datasets 
+                                     if item["domain"].lower() == domain.lower() and item["model"] == model]
+                        
+                        st.info(f"📋 {domain} 도메인 ({model}): {len(domain_data)}개")
+                        print(f"📋 {domain} 도메인 ({model}) 저장 준비: {len(domain_data)}개 데이터")
+                        
+                        if domain_data:
+                            output_path, count = save_domain_data(domain, domain_data, model, timestamp)
+                            if output_path:
+                                saved_files.append((f"{domain} ({model})", output_path, count))
+                                st.success(f"✅ {domain} 도메인 ({model}) 파일 저장 완료: {output_path}")
+                                print(f"✅ {domain} 도메인 ({model}) 저장 성공: {output_path} ({count}개)")
+                            else:
+                                st.error(f"❌ {domain} 도메인 ({model}) 파일 저장 실패")
+                                print(f"❌ {domain} 도메인 ({model}) 저장 실패")
+                        else:
+                            st.warning(f"⚠️ {domain} 도메인 ({model})에 저장할 데이터가 없습니다.")
+                            print(f"⚠️ {domain} 도메인 ({model}): 저장할 데이터 없음")
             
             # ===== 최종 결과 표시 =====
             st.markdown("---")
@@ -1056,11 +1305,33 @@ RESPONSE FORMAT (JSON array only):
                 st.metric("총 소요 시간", f"{total_duration:.1f}초")
             
             with col14:
-                st.metric("처리된 도메인", f"{len(selected_domains)}개")
+                if experiment_mode == "단일 모델 추출":
+                    st.metric("처리된 도메인", f"{len(selected_domains)}개")
+                else:
+                    st.metric("처리된 도메인", f"{len(selected_domains)}개")
             
             with col15:
                 total_generated = len(final_datasets)
-                st.metric("생성된 데이터셋", f"{total_generated}개")
+                if experiment_mode == "단일 모델 추출":
+                    st.metric("생성된 데이터셋", f"{total_generated}개")
+                else:
+                    st.metric("생성된 데이터셋", f"{total_generated}개")
+            
+            # 다중 모델 결과 요약
+            if experiment_mode == "다중 모델 추출":
+                st.markdown("**📊 모델별 결과 요약**")
+                
+                model_summary = {}
+                for item in final_datasets:
+                    model_name = item['model']
+                    if model_name not in model_summary:
+                        model_summary[model_name] = {'count': 0, 'domains': set()}
+                    model_summary[model_name]['count'] += 1
+                    model_summary[model_name]['domains'].add(item['domain'])
+                
+                for model_name, summary in model_summary.items():
+                    domains_str = ', '.join(sorted(summary['domains']))
+                    st.info(f"**{model_name}**: {summary['count']}개 결과 ({domains_str} 도메인)")
             
             # 생성된 파일 목록 표시
             st.markdown("---")
@@ -1080,8 +1351,14 @@ RESPONSE FORMAT (JSON array only):
                             st.write(f"📍 `{file_path.parent}`")
                 
                 # 출력 디렉토리 정보
-                safe_model_key = model_key.replace(":", "_")
-                st.info(f"📁 모든 파일이 `dataset/{safe_model_key}/` 디렉토리에 저장되었습니다.")
+                if experiment_mode == "단일 모델 추출":
+                    safe_model_key = model_key.replace(":", "_")
+                    st.info(f"📁 모든 파일이 `dataset/{safe_model_key}/` 디렉토리에 저장되었습니다.")
+                else:
+                    st.info(f"📁 각 모델별로 `dataset/[모델명]/` 디렉토리에 저장되었습니다.")
+                    for model in selected_models:
+                        safe_model_key = model.replace(":", "_")
+                        st.info(f"   - {model}: `dataset/{safe_model_key}/`")
                 
                 # 파일 크기 정보 표시
                 st.markdown("---")

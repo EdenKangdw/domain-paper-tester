@@ -1,0 +1,5 @@
+{"prompt": "In the context of patent litigation, how does the concept of enablement influence the validity of a patent claim, and what factors are considered when assessing whether a patent applicant has sufficiently disclosed the invention in the patent application?", "model": "llama2:7b", "domain": "Legal", "index": 1}
+{"prompt": "What are the primary legal implications of implementing a decentralized governance model in a jurisdiction known for its centralized legal framework?", "model": "llama2:7b", "domain": "Legal", "index": 2}
+{"prompt": "What are the primary legal implications of implementing artificial intelligence in the practice of corporate law?", "model": "llama2:7b", "domain": "Legal", "index": 3}
+{"prompt": "What are the primary ethical considerations associated with the use of artificial intelligence in legal research and analysis?", "model": "llama2:7b", "domain": "Legal", "index": 4}
+{"prompt": "In the context of intellectual property litigation, how does the exhaustion of rights doctrine apply when a plaintiff's use of a copyrighted work falls outside the scope of fair use?", "model": "llama2:7b", "domain": "Legal", "index": 5}

@@ -1,0 +1,5 @@
+{"prompt": "Sure, here is a new question or prompt related to the Technical domain:", "model": "llama2:7b", "domain": "Technical", "index": 1}
+{"prompt": "Question: Describe a recent technical project you worked on, and explain how you applied Agile methodologies to manage the project's scope, schedule, and resources.", "model": "llama2:7b", "domain": "Technical", "index": 2}
+{"prompt": "Question: How does the new feature X impact the system's performance, and what changes were made to address potential issues arising from its implementation?", "model": "llama2:7b", "domain": "Technical", "index": 3}
+{"prompt": "Question: Describe a recent technical project you led, and explain how you addressed a challenging technical issue that arose during development.", "model": "llama2:7b", "domain": "Technical", "index": 4}
+{"prompt": "Design a system architecture for a highly available and scalable e-commerce platform, taking into account current industry trends and best practices in cloud computing.", "model": "llama2:7b", "domain": "Technical", "index": 5}

@@ -21,12 +21,20 @@ except ImportError:
 # Model tokenizer settings (파라미터 수 무시하고 기본 모델명만 사용)
 MODEL_TOKENIZER_MAP = {
     "llama2": "meta-llama/Llama-2-7b-hf",
+    "llama2:7b": "meta-llama/Llama-2-7b-hf",
     "gemma": "google/gemma-7b",
+    "gemma:7b": "google/gemma-7b",
+    "gemma:2b": "google/gemma-2b",
     "qwen": "Qwen/Qwen-7B",
+    "qwen:7b": "Qwen/Qwen-7B",
+    "qwen:latest": "Qwen/Qwen-7B",
     "deepseek": "deepseek-ai/deepseek-coder-7b-base",
+    "deepseek:7b": "deepseek-ai/deepseek-coder-7b-base",
     "deepseek-r1": "deepseek-ai/deepseek-llm-7b-base",
+    "deepseek-r1:7b": "deepseek-ai/deepseek-llm-7b-base",
     "deepseek-r1-distill-llama": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
     "mistral": "mistralai/Mistral-7B-v0.1",
+    "mistral:7b": "mistralai/Mistral-7B-v0.1",
     "mixtral": "mistralai/Mixtral-8x7B-v0.1",
     "yi": "01-ai/Yi-6B",
     "openchat": "openchat/openchat",
@@ -38,8 +46,62 @@ MODEL_TOKENIZER_MAP = {
 # Origin 프롬프트 캐시
 _origin_prompts_cache = {}
 
+def clean_deepseek_response(response_text: str) -> str:
+    """DeepSeek 모델의 <think> 태그와 그 안의 내용을 제거하고, 태그 뒤의 내용만 반환합니다."""
+    if not response_text:
+        return response_text
+    
+    print(f"Original DeepSeek response: {repr(response_text)}")  # 디버깅용
+    
+    # <think> 태그가 있는지 확인
+    if "<think>" in response_text:
+        # <think> 태그의 시작 위치 찾기
+        think_start = response_text.find("<think>")
+        
+        # </think> 태그의 끝 위치 찾기
+        think_end = response_text.find("</think>")
+        
+        print(f"Think tags found: start={think_start}, end={think_end}")  # 디버깅용
+        
+        if think_end != -1:
+            # </think> 태그 이후의 내용만 추출 (</think>는 7자)
+            after_think = response_text[think_end + 7:].strip()
+            
+            # 만약 </think> 이후에 내용이 없으면, <think> 태그 안의 내용을 추출
+            if not after_think:
+                think_content = response_text[think_start + 7:think_end].strip()
+                response_text = think_content
+                print(f"Using think content: {repr(think_content)}")  # 디버깅용
+            else:
+                response_text = after_think
+                print(f"Using after think content: {repr(after_think)}")  # 디버깅용
+        else:
+            # </think> 태그가 없으면 <think> 태그부터 끝까지 제거
+            response_text = response_text[:think_start].strip()
+            print(f"No closing tag, using before think: {repr(response_text)}")  # 디버깅용
+    else:
+        print(f"No think tags found, using original: {repr(response_text)}")  # 디버깅용
+    
+    print(f"Final cleaned response: {repr(response_text)}")  # 디버깅용
+    return response_text
+
+def clean_prompt_text(prompt_text: str) -> str:
+    """프롬프트 텍스트에서 불필요한 따옴표와 공백을 제거합니다."""
+    if not prompt_text:
+        return prompt_text
+    
+    # 앞뒤 공백 제거
+    prompt_text = prompt_text.strip()
+    
+    # 앞뒤 따옴표 제거 (중첩된 따옴표도 처리)
+    while (prompt_text.startswith('"') and prompt_text.endswith('"')) or \
+          (prompt_text.startswith("'") and prompt_text.endswith("'")):
+        prompt_text = prompt_text[1:-1].strip()
+    
+    return prompt_text
+
 def load_origin_prompts():
-    """Origin 폴더에서 도메인별 프롬프트를 로드합니다."""
+    """Origin 폴더에서 모델별, 도메인별 프롬프트를 로드합니다."""
     # 세션 상태에서 캐시 확인
     if "origin_prompts_cache" in st.session_state:
         return st.session_state.origin_prompts_cache
@@ -51,23 +113,30 @@ def load_origin_prompts():
     
     prompts_cache = {}
     
-    for domain in ["general", "legal", "medical", "technical"]:
-        domain_dir = origin_dir / domain
-        prompt_file = domain_dir / f"{domain}_prompts.json"
-        
-        if prompt_file.exists():
-            try:
-                with open(prompt_file, 'r', encoding='utf-8') as f:
-                    prompts_data = json.load(f)
-                    # 프롬프트 텍스트만 추출
-                    prompts = [item["prompt"] for item in prompts_data]
-                    prompts_cache[domain.capitalize()] = prompts
-            except Exception as e:
-                st.error(f"Error loading prompts for {domain}: {str(e)}")
-                prompts_cache[domain.capitalize()] = []
-        else:
-            st.warning(f"Prompt file not found: {prompt_file}")
-            prompts_cache[domain.capitalize()] = []
+    # 모델별 폴더 확인
+    for model_dir in origin_dir.iterdir():
+        if model_dir.is_dir():
+            model_name = model_dir.name
+            prompts_cache[model_name] = {}
+            
+            # 도메인별 프롬프트 로드
+            for domain in ["economy", "legal", "medical", "technical"]:
+                domain_dir = model_dir / domain
+                prompt_file = domain_dir / f"{domain}_prompts.json"
+                
+                if prompt_file.exists():
+                    try:
+                        with open(prompt_file, 'r', encoding='utf-8') as f:
+                            prompts_data = json.load(f)
+                            # 프롬프트 텍스트만 추출
+                            prompts = [item["prompt"] for item in prompts_data]
+                            prompts_cache[model_name][domain.capitalize()] = prompts
+                    except Exception as e:
+                        st.error(f"Error loading prompts for {model_name}/{domain}: {str(e)}")
+                        prompts_cache[model_name][domain.capitalize()] = []
+                else:
+                    st.warning(f"Prompt file not found: {prompt_file}")
+                    prompts_cache[model_name][domain.capitalize()] = []
     
     # 세션 상태에 캐시 저장
     st.session_state.origin_prompts_cache = prompts_cache
@@ -115,7 +184,7 @@ def check_ollama_model_status_fast(model_name):
                 "prompt": "test",
                 "stream": False
             },
-            timeout=5  # 타임아웃을 5초로 연장
+            timeout=15  # 타임아웃을 15초로 연장 (큰 모델 로딩 시간 고려)
         )
         return response.status_code == 200
     except Exception as e:
@@ -472,7 +541,7 @@ def get_test_prompt(domain: str) -> str:
                 "What are the performance specifications?",
                 "What are the security measures implemented?"
             ],
-            "General": [
+            "Economy": [
                 "What is the main content of this document?",
                 "What are the key points discussed?",
                 "What are the main conclusions?",
@@ -482,7 +551,7 @@ def get_test_prompt(domain: str) -> str:
         }
         return random.choice(fallback_prompts.get(domain, ["Please enter your prompt here..."]))
 
-def extract_evidence_with_ollama(prompt, tokens, model_name, domain="general"):
+def extract_evidence_with_ollama(prompt, tokens, model_name, domain="economy"):
     """LLM이 evidence 토큰을 추출하고, 코드로 인덱스를 계산합니다."""
     try:
         # 토큰이 바이트 타입인 경우 문자열로 디코딩
@@ -515,7 +584,18 @@ def extract_evidence_with_ollama(prompt, tokens, model_name, domain="general"):
             result = response.json()
             if 'response' in result:
                 response_text = result['response']
-                print(f"Raw response from model: {response_text}")  # 디버깅용
+                
+                # deepseek 모델의 <think> 태그 제거
+                if "deepseek" in model_name.lower():
+                    import re
+                    # <think>...</think> 태그와 내용 제거
+                    response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL)
+                    # <think> 태그만 있는 경우 제거
+                    response_text = re.sub(r'<think>\s*</think>', '', response_text)
+                    response_text = response_text.strip()
+                    print(f"Raw response from model (deepseek 태그 제거): {response_text}")  # 디버깅용
+                else:
+                    print(f"Raw response from model: {response_text}")  # 디버깅용
                 
                 try:
                     # JSON 문자열 정리
@@ -661,8 +741,9 @@ def generate_domain_prompt(domain: str, model_key: str) -> str:
     """도메인별로 origin 폴더에서 프롬프트를 가져옵니다."""
     origin_prompts = load_origin_prompts()
     
-    if domain in origin_prompts and origin_prompts[domain]:
-        return random.choice(origin_prompts[domain])
+    # 모델별 프롬프트 확인
+    if model_key in origin_prompts and domain in origin_prompts[model_key] and origin_prompts[model_key][domain]:
+        return random.choice(origin_prompts[model_key][domain])
     else:
         # fallback: 기존 방식으로 프롬프트 생성
         prompt = f"""Generate a new question or prompt related to the {domain} domain.
@@ -676,6 +757,12 @@ Please provide only the prompt without any additional text or explanation."""
 
         try:
             response = get_model_response(model_key, prompt)
+            
+            # DeepSeek 모델의 <think> 태그 제거
+            if "deepseek" in model_key.lower():
+                response = clean_deepseek_response(response)
+                print(f"DeepSeek response cleaned: {response[:100]}...")  # 디버깅용
+            
             # 응답에서 첫 번째 문장만 추출
             prompt = response.split('\n')[0].strip()
             return prompt
@@ -728,41 +815,50 @@ def show():
     
     with col1:
         if models:
-            selected_model = st.selectbox(
-                "사용 가능한 Ollama 모델 선택",
+            st.markdown("**🔧 모델 선택 (여러 개 선택 가능)**")
+            selected_models = st.multiselect(
+                "사용 가능한 Ollama 모델들",
                 models,
-                key="ollama_model_selector"
+                default=[models[0]] if models else [],
+                help="여러 모델을 선택하면 순차적으로 처리됩니다."
             )
-            model_key = selected_model.lower()
+            
+            if selected_models:
+                st.info(f"선택된 모델: {', '.join(selected_models)}")
+                model_key = selected_models[0].lower()  # 첫 번째 모델을 기본값으로
+            else:
+                st.warning("⚠️ 최소 하나의 모델을 선택해주세요.")
+                model_key = None
         else:
             st.warning("⚠️ 선택할 수 있는 모델이 없습니다.")
             model_key = None
+            selected_models = []
     
     with col2:
-        if model_key:
-            # 모델 상태 확인
-            model_status = check_ollama_model_status_fast(model_key)
+        if selected_models:
+            st.markdown("**📊 모델 상태 확인**")
             
-            # 토크나이저 로드 상태 표시
-            tokenizer = load_tokenizer(model_key)
-            if not tokenizer:
-                st.warning(f"⚠️ 토크나이저를 찾을 수 없습니다: {model_key}")
-                st.info("지원되는 모델: " + ", ".join(MODEL_TOKENIZER_MAP.keys()))
-                return
-            
-            # 캐시된 토크나이저인지 확인
-            cache_key = f"tokenizer_{model_key}"
-            if cache_key in st.session_state:
-                st.success(f"✅ 토크나이저 로드 완료 (캐시됨)")
-            else:
-                st.success(f"✅ 토크나이저 로드 완료")
-            
-            # 모델 실행 상태 표시
-            if model_status:
-                st.success(f"✅ 모델 실행 중: {model_key}")
-            else:
-                st.warning(f"⚠️ 모델 미실행: {model_key}")
-                st.info("💡 Model Load 탭에서 모델을 시작해주세요")
+            # 선택된 모델들의 상태 확인
+            for model in selected_models:
+                model_lower = model.lower()
+                model_status = check_ollama_model_status_fast(model_lower)
+                
+                # 토크나이저 로드 상태 표시
+                tokenizer = load_tokenizer(model_lower)
+                
+                if tokenizer:
+                    if model_lower == model_key:  # 현재 선택된 모델
+                        st.success(f"✅ {model} (토크나이저 로드됨)")
+                    else:
+                        st.info(f"ℹ️ {model} (토크나이저 로드됨)")
+                else:
+                    st.warning(f"⚠️ {model} (토크나이저 없음)")
+                
+                # 모델 실행 상태 표시
+                if model_status:
+                    st.success(f"🟢 {model} (실행 중)")
+                else:
+                    st.warning(f"🔴 {model} (미실행)")
         else:
             st.warning("⚠️ 모델을 먼저 선택해주세요.")
             tokenizer = None
@@ -771,7 +867,7 @@ def show():
     st.markdown("---")
     st.subheader("🎯 Domain Configuration")
     
-    domains = ["Medical", "Legal", "Technical", "General"]
+    domains = ["Medical", "Legal", "Technical", "Economy"]
     
     # 생성 모드와 도메인 선택을 컬럼으로 배치
     col3, col4 = st.columns([1, 1])
@@ -860,45 +956,33 @@ def show():
     
     # ===== 프롬프트 생성 실행 =====
     if generate_prompts_button:
-        if not model_key:
-            st.error("❌ 모델을 선택해주세요.")
+        if not selected_models:
+            st.error("❌ 최소 하나의 모델을 선택해주세요.")
             return
         
-        if not tokenizer:
-            st.warning(f"⚠️ Tokenizer not found for model {model_key}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
+        # 선택된 모델들의 토크나이저와 상태 확인
+        valid_models = []
+        for model in selected_models:
+            model_lower = model.lower()
+            tokenizer = load_tokenizer(model_lower)
+            model_status = check_ollama_model_status_fast(model_lower)
+            
+            if not tokenizer:
+                st.warning(f"⚠️ Tokenizer not found for model {model}. Supported models: {', '.join(MODEL_TOKENIZER_MAP.keys())}")
+                continue
+            
+            if not model_status:
+                st.warning(f"⚠️ Model {model}가 실행되지 않고 있습니다.")
+                continue
+            
+            valid_models.append(model)
+        
+        if not valid_models:
+            st.error("❌ 유효한 모델이 없습니다. 토크나이저와 실행 상태를 확인해주세요.")
             return
-        
-        # Ollama 모델 실행 상태 확인 (더 정확한 확인)
-        # 캐시 무효화 후 상태 확인
-        get_running_models.clear()
-        model_status = check_ollama_model_status_fast(model_key)
-        
-        if not model_status:
-            # 실행 중인 모델 목록 확인
-            try:
-                response = requests.get(f"{OLLAMA_API_BASE}/api/ps", timeout=5)
-                if response.status_code == 200:
-                    running_models = response.json().get("models", [])
-                    if running_models:
-                        st.warning(f"⚠️ Model {model_key}가 실행되지 않고 있습니다.")
-                        st.info(f"💡 현재 실행 중인 모델: {', '.join([m.get('name', 'unknown') for m in running_models])}")
-                        st.info("💡 해결 방법:")
-                        st.info("1. Model Load 탭으로 이동")
-                        st.info("2. 올바른 모델을 선택하고 '🚀 모델 시작' 버튼 클릭")
-                        st.info("3. 모델이 실행된 후 이 페이지로 돌아와서 재시도")
-                    else:
-                        st.warning("⚠️ 실행 중인 Ollama 모델이 없습니다.")
-                        st.info("💡 Model Load 탭에서 모델을 시작해주세요.")
-                else:
-                    st.warning("⚠️ Ollama 서버에 연결할 수 없습니다.")
-                    st.info("💡 Ollama가 실행 중인지 확인해주세요.")
-                return
-            except Exception as e:
-                st.warning(f"⚠️ Model {model_key} 상태 확인 중 오류: {str(e)}")
-                st.info("💡 Model Load 탭에서 모델을 수동으로 시작해주세요.")
-                return
         
         try:
+            total_models = len(valid_models)
             total_domains = len(selected_domains)
             
             # 진행상황 표시를 위한 컨테이너들
@@ -909,57 +993,81 @@ def show():
             # 전체 시작 시간 기록
             total_start_time = time.time()
             
-            # 생성된 프롬프트들을 저장할 임시 데이터
+            # 생성된 프롬프트들을 저장할 임시 데이터 (모델별로 구분)
             generated_prompts = {}
             
-            for domain_idx, domain in enumerate(selected_domains, 1):
-                # 도메인별 시작 시간 기록
-                domain_start_time = time.time()
+            # 모델별로 순차 처리
+            for model_idx, model in enumerate(valid_models, 1):
+                model_lower = model.lower()
+                model_start_time = time.time()
                 
-                progress_text.text(f"Generating prompts for {domain} domain...")
+                progress_text.text(f"Processing model {model} ({model_idx}/{total_models})...")
                 
-                with st.spinner(f"Generating {num_prompts} prompts for {domain} domain ({domain_idx}/{total_domains})..."):
-                    # 도메인별 프롬프트 리스트 초기화
-                    generated_prompts[domain] = []
+                # 모델별 프롬프트 저장소 초기화
+                generated_prompts[model] = {}
+                
+                # 도메인별로 프롬프트 생성
+                for domain_idx, domain in enumerate(selected_domains, 1):
+                    domain_start_time = time.time()
                     
-                    for i in range(num_prompts):
-                        # 진행상황 카운터 업데이트 (도메인 정보 포함)
-                        progress_counter.text(f"{domain} domain: {i+1}/{num_prompts}")
+                    progress_text.text(f"Generating prompts for {model}/{domain} ({model_idx}/{total_models}, {domain_idx}/{total_domains})...")
+                    
+                    with st.spinner(f"Generating {num_prompts} prompts for {model}/{domain}..."):
+                        # 도메인별 프롬프트 리스트 초기화
+                        generated_prompts[model][domain] = []
                         
-                        # 시간 정보 업데이트
-                        current_time = time.time()
-                        elapsed_time = current_time - total_start_time
-                        
-                        # 예상 시간 계산 (현재 진행률 기준)
-                        total_prompts_to_generate = total_domains * num_prompts
-                        completed_prompts = (domain_idx - 1) * num_prompts + i
-                        if completed_prompts > 0:
-                            avg_time_per_prompt = elapsed_time / completed_prompts
-                            remaining_prompts = total_prompts_to_generate - completed_prompts
-                            estimated_remaining_time = avg_time_per_prompt * remaining_prompts
-                            estimated_total_time = elapsed_time + estimated_remaining_time
+                        for i in range(num_prompts):
+                            # 진행상황 카운터 업데이트
+                            progress_counter.text(f"{model}/{domain}: {i+1}/{num_prompts}")
                             
-                            time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
-                        else:
-                            time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
+                            # 시간 정보 업데이트
+                            current_time = time.time()
+                            elapsed_time = current_time - total_start_time
+                            
+                            # 예상 시간 계산
+                            total_prompts_to_generate = total_models * total_domains * num_prompts
+                            completed_prompts = (model_idx - 1) * total_domains * num_prompts + (domain_idx - 1) * num_prompts + i
+                            if completed_prompts > 0:
+                                avg_time_per_prompt = elapsed_time / completed_prompts
+                                remaining_prompts = total_prompts_to_generate - completed_prompts
+                                estimated_remaining_time = avg_time_per_prompt * remaining_prompts
+                                estimated_total_time = elapsed_time + estimated_remaining_time
+                                
+                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: {estimated_total_time:.1f}초 | 남은시간: {estimated_remaining_time:.1f}초")
+                            else:
+                                time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
+                            
+                            # Generate new prompt for the domain
+                            prompt = generate_domain_prompt(domain, model_lower)
+                            
+                            # DeepSeek 모델의 경우 한 번 더 <think> 태그 제거 확인
+                            if "deepseek" in model_lower:
+                                prompt = clean_deepseek_response(prompt)
+                                print(f"Final DeepSeek prompt cleaned: {prompt[:100]}...")  # 디버깅용
+                            
+                            # 모든 모델에 대해 프롬프트 텍스트 정리 (따옴표 제거)
+                            prompt = clean_prompt_text(prompt)
+                            print(f"Final prompt cleaned: {prompt[:100]}...")  # 디버깅용
+                            
+                            # 프롬프트 정보 저장
+                            prompt_data = {
+                                "prompt": prompt,
+                                "model": model_lower,
+                                "domain": domain,
+                                "index": i + 1
+                            }
+                            
+                            generated_prompts[model][domain].append(prompt_data)
                         
-                        # Generate new prompt for the domain
-                        prompt = generate_domain_prompt(domain, model_key)
-                        
-                        # 프롬프트 정보 저장 (response 제외)
-                        prompt_data = {
-                            "prompt": prompt,
-                            "model": model_key,
-                            "domain": domain,
-                            "index": i + 1
-                        }
-                        
-                        generated_prompts[domain].append(prompt_data)
-                    
-                    # 도메인별 완료 시간 계산
-                    domain_end_time = time.time()
-                    domain_duration = domain_end_time - domain_start_time
-                    print(f"{domain} domain prompts completed in {domain_duration:.2f} seconds")
+                        # 도메인별 완료 시간 계산
+                        domain_end_time = time.time()
+                        domain_duration = domain_end_time - domain_start_time
+                        print(f"{model}/{domain} prompts completed in {domain_duration:.2f} seconds")
+                
+                # 모델별 완료 시간 계산
+                model_end_time = time.time()
+                model_duration = model_end_time - model_start_time
+                print(f"{model} model completed in {model_duration:.2f} seconds")
             
             # 전체 완료 시간 계산
             total_end_time = time.time()
@@ -978,25 +1086,26 @@ def show():
             st.markdown("---")
             st.subheader("💾 Saving Generated Prompts")
             
-            # 도메인별로 파일 저장
+            # 모델별, 도메인별로 파일 저장
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             saved_files = []
             
-            for domain, prompts in generated_prompts.items():
-                if prompts:
-                    # Create output directory
-                    output_dir = Path(f"dataset/origin/{domain.lower()}")
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    # Create output file
-                    output_path = output_dir / f"{domain.lower()}_{len(prompts)}prompts_{timestamp}.jsonl"
-                    
-                    # Save to file
-                    with open(output_path, "w", encoding="utf-8") as f:
-                        for prompt_data in prompts:
-                            f.write(json.dumps(prompt_data, ensure_ascii=False) + "\n")
-                    
-                    saved_files.append((domain, output_path, len(prompts)))
+            for model, model_prompts in generated_prompts.items():
+                for domain, prompts in model_prompts.items():
+                    if prompts:
+                        # Create output directory (모델별 구조)
+                        output_dir = Path(f"dataset/origin/{model.lower()}/{domain.lower()}")
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                        
+                        # Create output file
+                        output_path = output_dir / f"{domain.lower()}_{len(prompts)}prompts_{timestamp}.jsonl"
+                        
+                        # Save to file
+                        with open(output_path, "w", encoding="utf-8") as f:
+                            for prompt_data in prompts:
+                                f.write(json.dumps(prompt_data, ensure_ascii=False) + "\n")
+                        
+                        saved_files.append((model, domain, output_path, len(prompts)))
             
             # ===== 저장 결과 표시 =====
             st.markdown("---")
@@ -1009,26 +1118,26 @@ def show():
                 st.metric("총 소요 시간", f"{total_duration:.1f}초")
             
             with col14:
-                st.metric("처리된 도메인", f"{total_domains}개")
+                st.metric("처리된 모델", f"{total_models}개")
             
             with col15:
-                total_generated = total_domains * num_prompts
+                total_generated = total_models * total_domains * num_prompts
                 st.metric("생성된 프롬프트", f"{total_generated}개")
             
             # 생성된 파일 목록 표시
             st.markdown("---")
             st.subheader("📋 Generated Files")
             
-            for domain, file_path, count in saved_files:
+            for model, domain, file_path, count in saved_files:
                 with st.container():
                     col16, col17 = st.columns([3, 1])
                     with col16:
-                        st.write(f"📄 **{domain}** 도메인: `{file_path.name}` ({count}개 프롬프트)")
+                        st.write(f"📄 **{model}/{domain}**: `{file_path.name}` ({count}개 프롬프트)")
                     with col17:
                         st.write(f"📍 `{file_path.parent}`")
             
             # 출력 디렉토리 정보
-            st.info(f"📁 모든 파일이 `dataset/origin/` 디렉토리에 저장되었습니다.")
+            st.info(f"📁 모든 파일이 `dataset/origin/[모델명]/[도메인명]/` 디렉토리에 저장되었습니다.")
             st.success("🎉 프롬프트 생성이 완료되었습니다! 이제 Evidence 추출 페이지에서 evidence를 추출할 수 있습니다.")
             
         except Exception as e:

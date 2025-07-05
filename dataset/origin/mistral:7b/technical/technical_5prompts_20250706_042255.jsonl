@@ -1,0 +1,5 @@
+{"prompt": "Describe the difference between Agile methodology and Waterfall methodology, highlighting their unique strengths, potential pitfalls, and ideal use cases in software development projects.", "model": "mistral:7b", "domain": "Technical", "index": 1}
+{"prompt": "What are the primary differences between SQL and NoSQL databases in terms of data modeling, scalability, and performance?", "model": "mistral:7b", "domain": "Technical", "index": 2}
+{"prompt": "Describe the primary differences between SQL and NoSQL databases, including their structural characteristics and use cases.", "model": "mistral:7b", "domain": "Technical", "index": 3}
+{"prompt": "Describe the differences between TCP and UDP protocols in terms of reliability, connection orientation, port usage, and common applications.", "model": "mistral:7b", "domain": "Technical", "index": 4}
+{"prompt": "Describe the differences between TCP and UDP protocols in terms of reliability, connection-orientedness, and port number usage.", "model": "mistral:7b", "domain": "Technical", "index": 5}
