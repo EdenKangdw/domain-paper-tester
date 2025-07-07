@@ -1,0 +1,5 @@
+{"prompt": "Why have I been feeling so tired lately?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
+{"prompt": "What can I do if I experience chest pain and want to improve my heart health?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
+{"prompt": "What are the potential long-term side effects of my recent surgery?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
+{"prompt": "How can I effectively manage my chronic condition while maintaining a healthy lifestyle?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
+{"prompt": "What could be causing my recent symptoms?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

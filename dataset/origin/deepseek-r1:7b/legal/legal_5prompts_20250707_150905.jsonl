@@ -1,0 +1,5 @@
+{"prompt": "", "model": "deepseek-r1:7b", "domain": "Legal", "index": 1}
+{"prompt": "<think>", "model": "deepseek-r1:7b", "domain": "Legal", "index": 2}
+{"prompt": "What steps can a lawyer take to resolve a property dispute?", "model": "deepseek-r1:7b", "domain": "Legal", "index": 3}
+{"prompt": "What can I do if I get a speeding ticket?", "model": "deepseek-r1:7b", "domain": "Legal", "index": 4}
+{"prompt": "What steps can I take to establish an effective estate plan in preparation for my potential passing?", "model": "deepseek-r1:7b", "domain": "Legal", "index": 5}

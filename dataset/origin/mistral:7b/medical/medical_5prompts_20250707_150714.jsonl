@@ -1,0 +1,5 @@
+{"prompt": "What are the long-term effects of untreated high blood pressure on the kidneys?", "model": "mistral:7b", "domain": "Medical", "index": 1}
+{"prompt": "Could this persistent cough be related to asthma?", "model": "mistral:7b", "domain": "Medical", "index": 2}
+{"prompt": "Could my persistent cough be caused by asthma?", "model": "mistral:7b", "domain": "Medical", "index": 3}
+{"prompt": "Could my persistent headache be due to migraines?", "model": "mistral:7b", "domain": "Medical", "index": 4}
+{"prompt": "Could this persistent cough be a symptom of pneumonia?", "model": "mistral:7b", "domain": "Medical", "index": 5}

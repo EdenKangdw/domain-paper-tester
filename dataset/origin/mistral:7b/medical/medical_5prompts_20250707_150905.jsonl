@@ -1,0 +1,5 @@
+{"prompt": "Could this persistent cough be related to asthma?", "model": "mistral:7b", "domain": "Medical", "index": 1}
+{"prompt": "Could this persistent cough be a sign of bronchitis?", "model": "mistral:7b", "domain": "Medical", "index": 2}
+{"prompt": "Could this persistent cough be due to asthma?", "model": "mistral:7b", "domain": "Medical", "index": 3}
+{"prompt": "Could this rash be caused by an allergy to a new medication I'm taking?", "model": "mistral:7b", "domain": "Medical", "index": 4}
+{"prompt": "Could this persistent cough be due to a respiratory infection?", "model": "mistral:7b", "domain": "Medical", "index": 5}

@@ -496,19 +496,19 @@ def get_model_response(model_name, prompt):
                 response_text = re.sub(r'<think>\s*</think>', '', response_text)
                 response_text = response_text.strip()
             
-            # 응답이 비어있거나 의미없는 경우 None 반환
+            # 응답이 비어있거나 의미없는 경우 빈 문자열 반환
             if not response_text or response_text.lower().startswith(('please enter', 'error', 'failed', 'i cannot', 'i am unable')):
                 print(f"Invalid response from model {model_name}: {response_text}")
-                return None
+                return ""
             
             return response_text
         else:
             print(f"API 요청 실패: {response.status_code}")
-            return None
+            return ""
             
     except Exception as e:
         print(f"모델 응답 요청 중 오류: {str(e)}")
-        return None
+        return ""
 
 @st.cache_data(ttl=30)  # 30초 캐시
 def get_available_models():

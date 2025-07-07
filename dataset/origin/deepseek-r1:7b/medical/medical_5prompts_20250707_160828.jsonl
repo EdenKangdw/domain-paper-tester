@@ -1,0 +1,5 @@
+{"prompt": "What could be causing my persistent headache?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
+{"prompt": "How can I effectively manage my hypertension at home?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
+{"prompt": "Are there risks of long-term complications from my recent bypass surgery?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
+{"prompt": "Are you experiencing symptoms of fatigue that could be related to COVID-19, or are they possibly due to something else?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
+{"prompt": "Am I at risk for heart disease given my current lifestyle and medical history?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

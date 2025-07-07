@@ -1,0 +1,5 @@
+{"prompt": "What are some widely-used programming languages for developing machine learning applications?", "model": "deepseek-r1:7b", "domain": "Technical", "index": 1}
+{"prompt": "", "model": "deepseek-r1:7b", "domain": "Technical", "index": 2}
+{"prompt": "How can one optimize the performance of their application on modern macOS", "model": "deepseek-r1:7b", "domain": "Technical", "index": 3}
+{"prompt": "How does JavaScript handle variable scope when using closures?", "model": "deepseek-r1:7b", "domain": "Technical", "index": 4}
+{"prompt": "What has been the evolution and key innovations in JavaScript from its creation to modern times?", "model": "deepseek-r1:7b", "domain": "Technical", "index": 5}

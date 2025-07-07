@@ -1,0 +1,5 @@
+{"prompt": "What is the primary difference between RAM and ROM in computer systems?", "model": "mistral:7b", "domain": "Technical", "index": 1}
+{"prompt": "Can you explain the purpose of the Raspberry Pi's GPIO pins?", "model": "mistral:7b", "domain": "Technical", "index": 2}
+{"prompt": "What is the purpose of a virtual machine in computer systems?", "model": "mistral:7b", "domain": "Technical", "index": 3}
+{"prompt": "What is the primary difference between a hash function and a checksum algorithm in computer science?", "model": "mistral:7b", "domain": "Technical", "index": 4}
+{"prompt": "What is the difference between TCP and UDP protocols in network communication?", "model": "mistral:7b", "domain": "Technical", "index": 5}
