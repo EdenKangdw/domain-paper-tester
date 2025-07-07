@@ -1,0 +1,5 @@
+{"prompt": "Can you recommend a treatment for my persistent cough that doesn't seem to be related to any underlying condition?", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "Doctor, I've been experiencing persistent abdominal pain and bloating. Could you please help me identify the cause and find an effective treatment?", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "Can you please explain why I'm experiencing persistent pain in my lower back?", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "What is the best course of treatment for my persistent cough?", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "What is the best treatment option for my persistent cough and shortness of breath?", "model": "llama2:7b", "domain": "Medical", "index": 5}

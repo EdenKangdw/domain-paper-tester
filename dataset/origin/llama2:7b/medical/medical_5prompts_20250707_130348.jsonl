@@ -1,0 +1,5 @@
+{"prompt": "ERROR", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "What are the best treatments for managing chronic pain without opioids?", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "ERROR", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "What are some common medical conditions that affect children and how can they be treated?", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "How do I choose the right medical specialist for my condition?", "model": "llama2:7b", "domain": "Medical", "index": 5}

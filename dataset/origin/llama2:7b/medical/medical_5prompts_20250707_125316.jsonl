@@ -1,0 +1,5 @@
+{"prompt": "What are the key considerations in the Medical domain?", "model": "llama2:7b", "domain": "Medical", "index": 1}
+{"prompt": "1. What are the most common medical conditions affecting children and how can they be treated?", "model": "llama2:7b", "domain": "Medical", "index": 2}
+{"prompt": "1. What are the best ways to manage chronic pain without relying on opioids?", "model": "llama2:7b", "domain": "Medical", "index": 3}
+{"prompt": "1. What are the most common medical conditions that affect children?", "model": "llama2:7b", "domain": "Medical", "index": 4}
+{"prompt": "What are the key considerations in the Medical domain?", "model": "llama2:7b", "domain": "Medical", "index": 5}

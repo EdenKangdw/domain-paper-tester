@@ -110,9 +110,15 @@ def load_file_data(file_path: Path) -> List[Dict[str, Any]]:
         print(f"Error loading {file_path}: {e}")
     return []
 
-def load_origin_prompts(domain: str) -> List[Dict[str, Any]]:
+def load_origin_prompts(domain: str, model_key: str = None) -> List[Dict[str, Any]]:
     """도메인별 origin 프롬프트 파일들을 로드합니다."""
-    origin_dir = Path(f"dataset/origin/{domain.lower()}")
+    if model_key:
+        # 모델별 도메인 디렉토리에서 로드
+        origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}/{domain.lower()}")
+    else:
+        # 기존 방식 (도메인 직접 디렉토리)
+        origin_dir = Path(f"dataset/origin/{domain.lower()}")
+    
     if not origin_dir.exists():
         return []
     
@@ -122,6 +128,55 @@ def load_origin_prompts(domain: str) -> List[Dict[str, Any]]:
     for file_path in origin_dir.glob("*.json*"):
         file_data = load_file_data(file_path)
         all_prompts.extend(file_data)
+    
+    return all_prompts
+
+def get_available_files(domain: str, model_key: str = None) -> List[Dict[str, Any]]:
+    """도메인별 사용 가능한 파일 목록을 반환합니다."""
+    if model_key:
+        # 모델별 도메인 디렉토리에서 로드
+        origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}/{domain.lower()}")
+    else:
+        # 기존 방식 (도메인 직접 디렉토리)
+        origin_dir = Path(f"dataset/origin/{domain.lower()}")
+    
+    if not origin_dir.exists():
+        return []
+    
+    files = []
+    for file_path in origin_dir.glob("*.json*"):
+        try:
+            file_data = load_file_data(file_path)
+            files.append({
+                "path": file_path,
+                "name": file_path.name,
+                "size": file_path.stat().st_size,
+                "prompt_count": len(file_data),
+                "data": file_data
+            })
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+    
+    return files
+
+def load_selected_files(domain: str, selected_files: List[str], model_key: str = None) -> List[Dict[str, Any]]:
+    """선택된 파일들에서 프롬프트를 로드합니다."""
+    if model_key:
+        # 모델별 도메인 디렉토리에서 로드
+        origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}/{domain.lower()}")
+    else:
+        # 기존 방식 (도메인 직접 디렉토리)
+        origin_dir = Path(f"dataset/origin/{domain.lower()}")
+    
+    if not origin_dir.exists():
+        return []
+    
+    all_prompts = []
+    for file_name in selected_files:
+        file_path = origin_dir / file_name
+        if file_path.exists():
+            file_data = load_file_data(file_path)
+            all_prompts.extend(file_data)
     
     return all_prompts
 
@@ -700,9 +755,9 @@ def show():
         st.warning("⚠️ 최소 하나의 모델을 선택해주세요.")
         return
     
-    # ===== 섹션 2: 도메인 선택 =====
+    # ===== 섹션 2: 도메인 및 파일 선택 =====
     st.markdown("---")
-    st.markdown("## 📁 Domain Selection")
+    st.markdown("## 📁 Domain & File Selection")
     
     # 사용 가능한 도메인 확인
     origin_dir = Path("dataset/origin")
@@ -744,6 +799,68 @@ def show():
         
         st.info("💡 도메인 정보를 다시 보려면 '📊 도메인 정보 보기' 버튼을 클릭하세요.")
     
+    # 파일 선택 기능 추가
+    if selected_domains:
+        st.markdown("---")
+        st.markdown("### 📄 File Selection")
+        
+        # 파일 선택 모드 선택
+        file_selection_mode = st.radio(
+            "파일 선택 모드",
+            ["모든 파일 사용", "특정 파일 선택"],
+            help="모든 파일을 사용할지, 특정 파일만 선택할지 결정합니다."
+        )
+        
+        if file_selection_mode == "특정 파일 선택":
+            st.info("💡 각 모델별, 도메인별로 사용할 파일을 선택하세요.")
+            
+            # 모델별 도메인 파일 선택
+            model_domain_file_selections = {}
+            
+            for model in selected_models:
+                st.markdown(f"### 🤖 {model} 모델")
+                
+                for domain in selected_domains:
+                    st.markdown(f"#### 📁 {domain} 도메인 파일 선택")
+                    
+                    available_files = get_available_files(domain, model)
+                    if not available_files:
+                        st.warning(f"⚠️ {model} 모델의 {domain} 도메인에 사용 가능한 파일이 없습니다.")
+                        continue
+                    
+                    # 파일 정보 표시
+                    file_options = []
+                    for file_info in available_files:
+                        file_size_mb = file_info["size"] / (1024 * 1024)
+                        file_options.append(f"{file_info['name']} ({file_info['prompt_count']}개 프롬프트, {file_size_mb:.1f}MB)")
+                    
+                    selected_files = st.multiselect(
+                        f"{model} - {domain} 도메인 파일 선택",
+                        options=[f["name"] for f in available_files],
+                        default=[f["name"] for f in available_files[:2]] if len(available_files) >= 2 else [f["name"] for f in available_files],
+                        format_func=lambda x: next((opt for opt in file_options if x in opt), x),
+                        help=f"{model} 모델의 {domain} 도메인에서 사용할 파일을 선택하세요."
+                    )
+                    
+                    if model not in model_domain_file_selections:
+                        model_domain_file_selections[model] = {}
+                    model_domain_file_selections[model][domain] = selected_files
+                    
+                    # 선택된 파일 정보 표시
+                    if selected_files:
+                        total_prompts = sum(
+                            f["prompt_count"] for f in available_files 
+                            if f["name"] in selected_files
+                        )
+                        st.success(f"✅ {model} - {domain} 도메인: {len(selected_files)}개 파일, {total_prompts}개 프롬프트 선택됨")
+                    else:
+                        st.warning(f"⚠️ {model} - {domain} 도메인: 파일이 선택되지 않음")
+        
+        else:
+            # 모든 파일 사용 모드
+            st.success("✅ 모든 파일을 사용합니다.")
+            domain_file_selections = None
+    
     # ===== 섹션 3: 미리보기 기능 =====
     st.markdown("---")
     st.markdown("## 👀 Preview Evidence Extraction")
@@ -752,7 +869,23 @@ def show():
     
     if preview_enabled and selected_domains:
         preview_domain = st.selectbox("미리보기할 도메인 선택", selected_domains)
-        preview_prompts = load_origin_prompts(preview_domain)
+        
+        # 선택된 파일이 있으면 해당 파일에서만 로드
+        if 'model_domain_file_selections' in locals() and model_domain_file_selections:
+            # 첫 번째 모델의 파일 선택 사용 (미리보기용)
+            first_model = selected_models[0] if selected_models else None
+            if first_model and first_model in model_domain_file_selections and preview_domain in model_domain_file_selections[first_model]:
+                selected_files = model_domain_file_selections[first_model][preview_domain]
+                if selected_files:
+                    preview_prompts = load_selected_files(preview_domain, selected_files, first_model)
+                else:
+                    preview_prompts = []
+            else:
+                preview_prompts = load_origin_prompts(preview_domain, first_model)
+        else:
+            # 기존 방식 (모든 파일 사용)
+            first_model = selected_models[0] if selected_models else None
+            preview_prompts = load_origin_prompts(preview_domain, first_model)
         
         if preview_prompts:
             preview_index = st.slider("미리보기할 프롬프트 인덱스", 0, min(len(preview_prompts)-1, 10), 0)
@@ -1046,12 +1179,23 @@ RESPONSE FORMAT (JSON array only):
             
             # 2. 도메인별 프롬프트 확인
             for domain in selected_domains:
-                prompts = load_origin_prompts(domain)
-                if prompts:
-                    st.success(f"✅ {domain} 도메인: {len(prompts)}개 프롬프트")
-                else:
-                    st.error(f"❌ {domain} 도메인: 프롬프트 없음")
-                    return
+                for model in selected_models:
+                    # 선택된 파일이 있으면 해당 파일에서만 로드
+                    if 'model_domain_file_selections' in locals() and model_domain_file_selections and model in model_domain_file_selections and domain in model_domain_file_selections[model]:
+                        selected_files = model_domain_file_selections[model][domain]
+                        if selected_files:
+                            prompts = load_selected_files(domain, selected_files, model)
+                            st.success(f"✅ {model} - {domain} 도메인: {len(prompts)}개 프롬프트 (선택된 파일: {len(selected_files)}개)")
+                        else:
+                            st.error(f"❌ {model} - {domain} 도메인: 선택된 파일이 없음")
+                            return
+                    else:
+                        prompts = load_origin_prompts(domain, model)
+                        if prompts:
+                            st.success(f"✅ {model} - {domain} 도메인: {len(prompts)}개 프롬프트 (모든 파일)")
+                        else:
+                            st.error(f"❌ {model} - {domain} 도메인: 프롬프트 없음")
+                            return
             
             st.success("✅ 모든 사전 체크 통과! Evidence 추출을 시작합니다.")
             st.markdown("---")
@@ -1072,36 +1216,53 @@ RESPONSE FORMAT (JSON array only):
             completed_tasks = 0
             
             for domain_idx, domain in enumerate(selected_domains, 1):
-                # 도메인별 시작 시간 기록
-                domain_start_time = time.time()
+                for model_idx, model in enumerate(selected_models, 1):
+                    # 모델별 도메인별 시작 시간 기록
+                    model_domain_start_time = time.time()
+                    
+                    # 모델별 도메인 프롬프트 로드
+                    if 'model_domain_file_selections' in locals() and model_domain_file_selections and model in model_domain_file_selections and domain in model_domain_file_selections[model]:
+                        selected_files = model_domain_file_selections[model][domain]
+                        if selected_files:
+                            prompts = load_selected_files(domain, selected_files, model)
+                        else:
+                            st.warning(f"⚠️ {model} - {domain} 도메인에 선택된 파일이 없습니다.")
+                            continue
+                    else:
+                        prompts = load_origin_prompts(domain, model)
+                    
+                    if not prompts:
+                        st.warning(f"⚠️ {model} - {domain} 도메인에 프롬프트가 없습니다.")
+                        continue
                 
-                # 도메인 프롬프트 로드
-                prompts = load_origin_prompts(domain)
-                if not prompts:
-                    st.warning(f"⚠️ {domain} 도메인에 프롬프트가 없습니다.")
-                    continue
-                
-                # 테스트 모드인 경우 처음 5개만 처리
-                if test_mode:
-                    prompts = prompts[:5]
-                    st.info(f"🧪 테스트 모드: {domain} 도메인에서 처음 5개 프롬프트만 처리합니다.")
+                    # 테스트 모드인 경우 처음 5개만 처리
+                    if test_mode:
+                        prompts = prompts[:5]
+                        st.info(f"🧪 테스트 모드: {model} - {domain} 도메인에서 처음 5개 프롬프트만 처리합니다.")
                 
                 if experiment_mode == "단일 모델 추출":
                     # 단일 모델 처리
-                    progress_text.text(f"Extracting evidence from {domain} domain prompts using {model_key}...")
+                    progress_text.text(f"Extracting evidence from {domain} domain prompts using {model}...")
                     
-                    with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain using {model_key} ({domain_idx}/{len(selected_domains)})..."):
+                    with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain using {model} ({domain_idx}/{len(selected_domains)})..."):
                         for i, prompt_data in enumerate(prompts):
                             # 진행상황 카운터 업데이트
-                            progress_counter.text(f"{domain} domain: {i+1}/{len(prompts)}")
+                            progress_counter.text(f"{model} - {domain} domain: {i+1}/{len(prompts)}")
                             
                             # 시간 정보 업데이트
                             current_time = time.time()
                             elapsed_time = current_time - total_start_time
                             
                             # 예상 시간 계산
-                            total_prompts_to_process = sum(len(load_origin_prompts(d)) for d in selected_domains)
-                            completed_prompts = sum(len(load_origin_prompts(d)) for d in selected_domains[:domain_idx-1]) + i
+                            def get_domain_prompt_count(d, m):
+                                if 'model_domain_file_selections' in locals() and model_domain_file_selections and m in model_domain_file_selections and d in model_domain_file_selections[m]:
+                                    selected_files = model_domain_file_selections[m][d]
+                                    if selected_files:
+                                        return len(load_selected_files(d, selected_files, m))
+                                return len(load_origin_prompts(d, m))
+                            
+                            total_prompts_to_process = sum(get_domain_prompt_count(d, model) for d in selected_domains)
+                            completed_prompts = sum(get_domain_prompt_count(d, model) for d in selected_domains[:domain_idx-1]) + i
                             if completed_prompts > 0:
                                 avg_time_per_prompt = elapsed_time / completed_prompts
                                 remaining_prompts = total_prompts_to_process - completed_prompts
@@ -1113,44 +1274,52 @@ RESPONSE FORMAT (JSON array only):
                                 time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
                             
                             # 단일 프롬프트 처리
-                            processed_item = process_single_prompt(prompt_data, model_key, domain, tokenizer_name)
+                            tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
+                            processed_item = process_single_prompt(prompt_data, model, domain, tokenizer_name)
                             if processed_item:
                                 final_datasets.append(processed_item)
                                 # 디버깅: 성공한 경우 로그
                                 if (i + 1) % 10 == 0:
-                                    print(f"✅ Processed {i+1}/{len(prompts)} prompts in {domain} domain - Evidence tokens: {len(processed_item.get('evidence_tokens', []))}")
+                                    print(f"✅ Processed {i+1}/{len(prompts)} prompts in {model} - {domain} domain - Evidence tokens: {len(processed_item.get('evidence_tokens', []))}")
                             else:
                                 # 디버깅: 실패한 경우 상세 로그
-                                print(f"❌ Failed to process prompt {i+1} in {domain} domain")
+                                print(f"❌ Failed to process prompt {i+1} in {model} - {domain} domain")
                                 if i < 3:  # 처음 3개만 상세 로그
                                     print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
                                     print(f"   Domain: {domain}")
-                                    print(f"   Model: {model_key}")
+                                    print(f"   Model: {model}")
                                     print(f"   Tokenizer: {tokenizer_name}")
                                 if (i + 1) % 10 == 0:
-                                    print(f"❌ Failed {i+1}/{len(prompts)} prompts in {domain} domain")
+                                    print(f"❌ Failed {i+1}/{len(prompts)} prompts in {model} - {domain} domain")
                         
-                        # 도메인별 완료 시간 계산
-                        domain_end_time = time.time()
-                        domain_duration = domain_end_time - domain_start_time
-                        print(f"{domain} domain evidence extraction completed in {domain_duration:.2f} seconds")
+                        # 모델별 도메인별 완료 시간 계산
+                        model_domain_end_time = time.time()
+                        model_domain_duration = model_domain_end_time - model_domain_start_time
+                        print(f"{model} - {domain} domain evidence extraction completed in {model_domain_duration:.2f} seconds")
                 
                 else:
-                    # 다중 모델 처리
-                    progress_text.text(f"Extracting evidence from {domain} domain prompts using {len(selected_models)} models...")
+                    # 다중 모델 처리 - 현재 모델만 처리
+                    progress_text.text(f"Extracting evidence from {domain} domain prompts using {model}...")
                     
-                    with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain using {len(selected_models)} models ({domain_idx}/{len(selected_domains)})..."):
+                    with st.spinner(f"Extracting evidence from {len(prompts)} prompts in {domain} domain using {model} ({domain_idx}/{len(selected_domains)})..."):
                         for i, prompt_data in enumerate(prompts):
                             # 진행상황 카운터 업데이트
-                            progress_counter.text(f"{domain} domain: {i+1}/{len(prompts)} (모델: {len(selected_models)}개)")
+                            progress_counter.text(f"{model} - {domain} domain: {i+1}/{len(prompts)}")
                             
                             # 시간 정보 업데이트
                             current_time = time.time()
                             elapsed_time = current_time - total_start_time
                             
-                            # 예상 시간 계산 (모델 수를 고려)
-                            total_prompts_to_process = sum(len(load_origin_prompts(d)) for d in selected_domains) * len(selected_models)
-                            completed_prompts = (sum(len(load_origin_prompts(d)) for d in selected_domains[:domain_idx-1]) + i) * len(selected_models)
+                            # 예상 시간 계산
+                            def get_domain_prompt_count(d, m):
+                                if 'model_domain_file_selections' in locals() and model_domain_file_selections and m in model_domain_file_selections and d in model_domain_file_selections[m]:
+                                    selected_files = model_domain_file_selections[m][d]
+                                    if selected_files:
+                                        return len(load_selected_files(d, selected_files, m))
+                                return len(load_origin_prompts(d, m))
+                            
+                            total_prompts_to_process = sum(get_domain_prompt_count(d, m) for d in selected_domains for m in selected_models)
+                            completed_prompts = sum(get_domain_prompt_count(d, m) for d in selected_domains[:domain_idx-1] for m in selected_models) + sum(get_domain_prompt_count(domain, m) for m in selected_models[:model_idx-1]) + i
                             if completed_prompts > 0:
                                 avg_time_per_prompt = elapsed_time / completed_prompts
                                 remaining_prompts = total_prompts_to_process - completed_prompts
@@ -1161,28 +1330,29 @@ RESPONSE FORMAT (JSON array only):
                             else:
                                 time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
                             
-                            # 다중 모델로 프롬프트 처리
-                            processed_items = process_single_prompt_multi_models(prompt_data, selected_models, domain)
-                            if processed_items:
-                                final_datasets.extend(processed_items)
+                            # 단일 모델로 프롬프트 처리
+                            tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
+                            processed_item = process_single_prompt(prompt_data, model, domain, tokenizer_name)
+                            if processed_item:
+                                final_datasets.append(processed_item)
                                 # 디버깅: 성공한 경우 로그
                                 if (i + 1) % 10 == 0:
-                                    total_evidence = sum(len(item.get('evidence_tokens', [])) for item in processed_items)
-                                    print(f"✅ Processed {i+1}/{len(prompts)} prompts in {domain} domain with {len(selected_models)} models - Total evidence tokens: {total_evidence}")
+                                    print(f"✅ Processed {i+1}/{len(prompts)} prompts in {model} - {domain} domain - Evidence tokens: {len(processed_item.get('evidence_tokens', []))}")
                             else:
                                 # 디버깅: 실패한 경우 상세 로그
-                                print(f"❌ Failed to process prompt {i+1} in {domain} domain with all models")
+                                print(f"❌ Failed to process prompt {i+1} in {model} - {domain} domain")
                                 if i < 3:  # 처음 3개만 상세 로그
                                     print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
                                     print(f"   Domain: {domain}")
-                                    print(f"   Models: {selected_models}")
+                                    print(f"   Model: {model}")
+                                    print(f"   Tokenizer: {tokenizer_name}")
                                 if (i + 1) % 10 == 0:
-                                    print(f"❌ Failed {i+1}/{len(prompts)} prompts in {domain} domain")
+                                    print(f"❌ Failed {i+1}/{len(prompts)} prompts in {model} - {domain} domain")
                         
-                        # 도메인별 완료 시간 계산
-                        domain_end_time = time.time()
-                        domain_duration = domain_end_time - domain_start_time
-                        print(f"{domain} domain evidence extraction completed in {domain_duration:.2f} seconds")
+                        # 모델별 도메인별 완료 시간 계산
+                        model_domain_end_time = time.time()
+                        model_domain_duration = model_domain_end_time - model_domain_start_time
+                        print(f"{model} - {domain} domain evidence extraction completed in {model_domain_duration:.2f} seconds")
             
             # 전체 완료 시간 계산
             total_end_time = time.time()

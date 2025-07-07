@@ -1,0 +1,5 @@
+{"prompt": "\"What are the most common symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 1}
+{"prompt": "\"What are the symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 2}
+{"prompt": "\"What are the common symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 3}
+{"prompt": "\"What are the symptoms of COVID-19?\"", "model": "mistral:7b", "domain": "Medical", "index": 4}
+{"prompt": "\"What are the symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 5}

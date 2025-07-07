@@ -1,0 +1,5 @@
+{"prompt": "What are some effective strategies for managing chronic pain when traveling long distances?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
+{"prompt": "What can I do for this persistent pain?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
+{"prompt": "Is there any chance my condition might get worse?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
+{"prompt": "What are some effective ways to prevent vision loss due to type 2 diabetes?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
+{"prompt": "", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

@@ -67,20 +67,32 @@ def clean_deepseek_response(response_text: str) -> str:
             # </think> 태그 이후의 내용만 추출 (</think>는 7자)
             after_think = response_text[think_end + 7:].strip()
             
-            # 만약 </think> 이후에 내용이 없으면, <think> 태그 안의 내용을 추출
-            if not after_think:
-                think_content = response_text[think_start + 7:think_end].strip()
-                response_text = think_content
-                print(f"Using think content: {repr(think_content)}")  # 디버깅용
-            else:
+            # 만약 </think> 이후에 내용이 있으면 그것을 사용
+            if after_think:
                 response_text = after_think
                 print(f"Using after think content: {repr(after_think)}")  # 디버깅용
+            else:
+                # </think> 이후에 내용이 없으면, <think> 태그 안의 내용을 추출
+                think_content = response_text[think_start + 7:think_end].strip()
+                if think_content:
+                    response_text = think_content
+                    print(f"Using think content: {repr(think_content)}")  # 디버깅용
+                else:
+                    # <think> 태그 안도 비어있으면 <think> 태그 이전 내용 사용
+                    before_think = response_text[:think_start].strip()
+                    response_text = before_think
+                    print(f"Think content empty, using before think: {repr(before_think)}")  # 디버깅용
         else:
             # </think> 태그가 없으면 <think> 태그부터 끝까지 제거
             response_text = response_text[:think_start].strip()
             print(f"No closing tag, using before think: {repr(response_text)}")  # 디버깅용
     else:
         print(f"No think tags found, using original: {repr(response_text)}")  # 디버깅용
+    
+    # 최종 검증: 빈 문자열이면 원본 반환
+    if not response_text.strip():
+        print("Cleaned response is empty, returning original")
+        return response_text
     
     print(f"Final cleaned response: {repr(response_text)}")  # 디버깅용
     return response_text
@@ -98,7 +110,17 @@ def clean_prompt_text(prompt_text: str) -> str:
           (prompt_text.startswith("'") and prompt_text.endswith("'")):
         prompt_text = prompt_text[1:-1].strip()
     
-    return prompt_text
+    # 번호 제거 (예: "1. ", "2. ", "a) ", "b) " 등)
+    import re
+    prompt_text = re.sub(r'^\d+\.\s*', '', prompt_text)  # "1. ", "2. " 등 제거
+    prompt_text = re.sub(r'^[a-z]\)\s*', '', prompt_text)  # "a) ", "b) " 등 제거
+    prompt_text = re.sub(r'^[A-Z]\)\s*', '', prompt_text)  # "A) ", "B) " 등 제거
+    prompt_text = re.sub(r'^[ivx]+\)\s*', '', prompt_text, flags=re.IGNORECASE)  # "i) ", "ii) " 등 제거
+    
+    # 불필요한 공백 정리
+    prompt_text = re.sub(r'\s+', ' ', prompt_text)
+    
+    return prompt_text.strip()
 
 def load_origin_prompts():
     """Origin 폴더에서 모델별, 도메인별 프롬프트를 로드합니다."""
@@ -745,30 +767,52 @@ def generate_domain_prompt(domain: str, model_key: str) -> str:
     if model_key in origin_prompts and domain in origin_prompts[model_key] and origin_prompts[model_key][domain]:
         return random.choice(origin_prompts[model_key][domain])
     else:
-        # fallback: 기존 방식으로 프롬프트 생성
-        prompt = f"""Generate a new question or prompt related to the {domain} domain.
-The prompt should be:
-1. Specific to the {domain} domain
-2. Clear and concise
-3. Focused on extracting key information
-4. Natural and professional
-
-Please provide only the prompt without any additional text or explanation."""
-
+        # 도메인별 구체적인 요청 프롬프트
+        domain_prompts = {
+            "Medical": "Generate only one medical question a patient might ask a doctor. Respond with a single, clear question sentence only. Do not include explanations, lists, or any other text.",
+            "Legal": "Generate only one legal question someone might ask a lawyer. Respond with a single, clear question sentence only. Do not include explanations, lists, or any other text.",
+            "Technical": "Generate only one technical question about computers, software, or technology. Respond with a single, clear question sentence only. Do not include explanations, lists, or any other text.",
+            "Economy": "Generate only one economic question about markets, finance, or business. Respond with a single, clear question sentence only. Do not include explanations, lists, or any other text."
+        }
+        
+        request_prompt = domain_prompts.get(domain, f"Generate only one question about {domain}. Respond with a single, clear question sentence only. Do not include explanations, lists, or any other text.")
+        
         try:
-            response = get_model_response(model_key, prompt)
+            response = get_model_response(model_key, request_prompt)
             
-            # DeepSeek 모델의 <think> 태그 제거
-            if "deepseek" in model_key.lower():
-                response = clean_deepseek_response(response)
-                print(f"DeepSeek response cleaned: {response[:100]}...")  # 디버깅용
+            # 응답이 None이거나 비어있는 경우
+            if not response:
+                print(f"Empty or invalid response from model {model_key}")
+                return None
+            
+            # 응답 정리 및 검증
+            if not response or not response.strip():
+                print(f"Empty response from model {model_key}")
+                return None
             
             # 응답에서 첫 번째 문장만 추출
-            prompt = response.split('\n')[0].strip()
+            lines = [line.strip() for line in response.split('\n') if line.strip()]
+            if not lines:
+                print(f"No valid lines in response from model {model_key}")
+                return None
+            
+            prompt = lines[0]
+            
+            # 프롬프트 검증 (더 관대한 조건)
+            if len(prompt) < 5:  # 최소 길이를 5자로 줄임
+                print(f"Prompt too short: {prompt}")
+                return None
+            
+            # 명확히 잘못된 응답만 필터링
+            invalid_starts = ('please enter', 'error', 'failed', 'i cannot', 'i am unable', 'i do not have')
+            if prompt.lower().startswith(invalid_starts):
+                print(f"Invalid prompt generated: {prompt}")
+                return None
+            
             return prompt
         except Exception as e:
             print(f"Error generating prompt: {str(e)}")
-            return f"Please enter your {domain} domain prompt here..."
+            return None
 
 def show():
     st.title("📝 Domain Prompt Generator")
@@ -1015,10 +1059,13 @@ def show():
                     with st.spinner(f"Generating {num_prompts} prompts for {model}/{domain}..."):
                         # 도메인별 프롬프트 리스트 초기화
                         generated_prompts[model][domain] = []
+                        used_prompts = set()  # 중복 제거를 위한 set
                         
-                        for i in range(num_prompts):
+                        i = 0
+                        while len(generated_prompts[model][domain]) < num_prompts:
                             # 진행상황 카운터 업데이트
-                            progress_counter.text(f"{model}/{domain}: {i+1}/{num_prompts}")
+                            current_count = len(generated_prompts[model][domain])
+                            progress_counter.text(f"{model}/{domain}: {current_count}/{num_prompts} (attempt {i+1})")
                             
                             # 시간 정보 업데이트
                             current_time = time.time()
@@ -1038,7 +1085,42 @@ def show():
                                 time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
                             
                             # Generate new prompt for the domain
+                            print(f"Generating prompt for {domain} with {model_lower}...")
                             prompt = generate_domain_prompt(domain, model_lower)
+                            print(f"Generated prompt: {prompt}")
+                            
+                            # 프롬프트가 None이거나 유효하지 않은 경우 재시도
+                            retry_count = 0
+                            max_retries = 3
+                            while (not prompt or prompt == "ERROR" or 
+                                   prompt.lower().startswith(('please enter', 'error', 'failed', 'i cannot', 'i am unable'))) and retry_count < max_retries:
+                                print(f"Invalid prompt generated, retrying... (attempt {retry_count + 1}/{max_retries})")
+                                # 재시도 시에는 다른 요청 프롬프트 사용
+                                if retry_count == 1:
+                                    request_prompt = f"Ask a question about {domain.lower()} topics."
+                                elif retry_count == 2:
+                                    request_prompt = f"What would you like to know about {domain.lower()}?"
+                                else:
+                                    request_prompt = f"Generate a {domain.lower()} question."
+                                
+                                try:
+                                    response = get_model_response(model_lower, request_prompt)
+                                    if response and response.strip():
+                                        lines = [line.strip() for line in response.split('\n') if line.strip()]
+                                        if lines and len(lines[0]) >= 5:
+                                            prompt = lines[0]
+                                        else:
+                                            prompt = None
+                                    else:
+                                        prompt = None
+                                except:
+                                    prompt = None
+                                retry_count += 1
+                            
+                            # 최대 재시도 후에도 유효하지 않은 경우 공백으로 처리
+                            if not prompt or prompt == "ERROR" or prompt.lower().startswith(('please enter', 'error', 'failed', 'i cannot', 'i am unable')):
+                                print(f"Failed to generate valid prompt after {max_retries} attempts, marking as empty")
+                                prompt = ""
                             
                             # DeepSeek 모델의 경우 한 번 더 <think> 태그 제거 확인
                             if "deepseek" in model_lower:
@@ -1049,15 +1131,67 @@ def show():
                             prompt = clean_prompt_text(prompt)
                             print(f"Final prompt cleaned: {prompt[:100]}...")  # 디버깅용
                             
-                            # 프롬프트 정보 저장
-                            prompt_data = {
-                                "prompt": prompt,
-                                "model": model_lower,
-                                "domain": domain,
-                                "index": i + 1
-                            }
+                            # 중복 제거: 이미 사용된 프롬프트인지 확인
+                            if prompt in used_prompts:
+                                print(f"Duplicate prompt detected: {prompt[:50]}...")
+                                # 중복된 경우 다시 생성 시도
+                                retry_count = 0
+                                while prompt in used_prompts and retry_count < 3:
+                                    print(f"Generating alternative prompt (attempt {retry_count + 1})")
+                                    new_prompt = generate_domain_prompt(domain, model_lower)
+                                    if new_prompt and new_prompt not in used_prompts:
+                                        prompt = clean_prompt_text(new_prompt)
+                                        break
+                                    retry_count += 1
                             
-                            generated_prompts[model][domain].append(prompt_data)
+                            # 공백인 경우 다시 요청 (무한 루프 방지를 위해 최대 10회)
+                            retry_for_empty = 0
+                            while not prompt.strip() and retry_for_empty < 10:
+                                print(f"Empty prompt generated, retrying... (attempt {retry_for_empty + 1}/10)")
+                                prompt = generate_domain_prompt(domain, model_lower)
+                                if prompt:
+                                    # DeepSeek 모델의 경우 한 번 더 <think> 태그 제거 확인
+                                    if "deepseek" in model_lower:
+                                        prompt = clean_deepseek_response(prompt)
+                                        print(f"Final DeepSeek prompt cleaned: {prompt[:100]}...")  # 디버깅용
+                                    
+                                    # 모든 모델에 대해 프롬프트 텍스트 정리 (따옴표 제거)
+                                    prompt = clean_prompt_text(prompt)
+                                    print(f"Final prompt cleaned: {prompt[:100]}...")  # 디버깅용
+                                    
+                                    # 중복 제거: 이미 사용된 프롬프트인지 확인
+                                    if prompt in used_prompts:
+                                        print(f"Duplicate prompt detected: {prompt[:50]}...")
+                                        # 중복된 경우 다시 생성 시도
+                                        retry_count = 0
+                                        while prompt in used_prompts and retry_count < 3:
+                                            print(f"Generating alternative prompt (attempt {retry_count + 1})")
+                                            new_prompt = generate_domain_prompt(domain, model_lower)
+                                            if new_prompt and new_prompt not in used_prompts:
+                                                prompt = clean_prompt_text(new_prompt)
+                                                break
+                                            retry_count += 1
+                                retry_for_empty += 1
+                            
+                            # 최종적으로 공백이 아닌 경우에만 저장
+                            if prompt.strip():
+                                # 프롬프트를 사용된 목록에 추가
+                                used_prompts.add(prompt)
+                                
+                                # 프롬프트 정보 저장
+                                prompt_data = {
+                                    "prompt": prompt,
+                                    "model": model_lower,
+                                    "domain": domain,
+                                    "index": len(generated_prompts[model][domain]) + 1
+                                }
+                                
+                                generated_prompts[model][domain].append(prompt_data)
+                                print(f"Successfully added prompt: {prompt[:50]}...")
+                            else:
+                                print(f"Failed to generate valid prompt after all retries, skipping...")
+                            
+                            i += 1
                         
                         # 도메인별 완료 시간 계산
                         domain_end_time = time.time()
