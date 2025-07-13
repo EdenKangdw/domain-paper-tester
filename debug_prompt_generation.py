@@ -65,12 +65,12 @@ def main():
     # 테스트할 모델들 (실제 모델 이름)
     models = ["llama2:7b", "deepseek-r1:7b"]
     
-    # 도메인별 테스트 프롬프트
+    # 도메인별 테스트 프롬프트 (딥시크 모델용 구체적 버전)
     domain_prompts = {
-        "Medical": "Create a specific medical question that a patient might ask a doctor. Focus on symptoms, treatments, or health concerns.",
-        "Legal": "Create a specific legal question that someone might ask a lawyer. Focus on contracts, rights, or legal procedures.",
-        "Technical": "Create a specific technical question about computers, software, or technology that someone might ask an expert.",
-        "Economy": "Create a specific economic question about markets, finance, or business that someone might ask an economist."
+        "Medical": "Write only one clear medical question about symptoms, treatment, or health. Do not explain your reasoning. Do not include <think> or any thoughts. Only output the question sentence itself. Example: What are the symptoms of diabetes?",
+        "Legal": "Write only one clear legal question about contracts, rights, or procedures. Do not explain your reasoning. Do not include <think> or any thoughts. Only output the question sentence itself. Example: What are the requirements for a valid contract?",
+        "Technical": "Write only one clear technical question about computers or technology. Do not explain your reasoning. Do not include <think> or any thoughts. Only output the question sentence itself. Example: How does machine learning work?",
+        "Economy": "Write only one clear economic question about markets or finance. Do not explain your reasoning. Do not include <think> or any thoughts. Only output the question sentence itself. Example: How do interest rates affect the economy?"
     }
     
     for model in models:

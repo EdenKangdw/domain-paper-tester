@@ -1,5 +1,0 @@
-{"prompt": "In the context of cardiovascular disease management, summarize the key findings and recommendations from recent clinical trials on the efficacy and safety of novel pharmacological interventions targeting specific molecular pathways.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
-{"prompt": "Describe the primary ethical considerations associated with the use of artificial intelligence in patient diagnosis and treatment.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
-{"prompt": "What are the key clinical features associated with a diagnosis of atrial fibrillation in patients presenting with stroke?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
-{"prompt": "What are the key considerations for implementing a telehealth program in a rural healthcare setting?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
-{"prompt": "Describe the key clinical findings associated with a patient presenting with symptoms of fatigue, muscle weakness, and elevated liver enzymes.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

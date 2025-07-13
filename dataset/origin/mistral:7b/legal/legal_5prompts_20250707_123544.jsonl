@@ -1,5 +1,0 @@
-{"prompt": "1. \"What is the statute of limitations for personal injury lawsuits in my state?\"", "model": "mistral:7b", "domain": "Legal", "index": 1}
-{"prompt": "1. \"What are the key differences between tort law and criminal law?\"", "model": "mistral:7b", "domain": "Legal", "index": 2}
-{"prompt": "1. What are the key differences between a contract and an agreement?", "model": "mistral:7b", "domain": "Legal", "index": 3}
-{"prompt": "1. \"What is the statute of limitations for personal injury claims in my state?\"", "model": "mistral:7b", "domain": "Legal", "index": 4}
-{"prompt": "1. What is the difference between civil and criminal law?", "model": "mistral:7b", "domain": "Legal", "index": 5}

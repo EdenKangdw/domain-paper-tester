@@ -1,5 +1,0 @@
-{"prompt": "", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
-{"prompt": "Is my chest pain caused by pneumonia?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
-{"prompt": "Can you explain what could cause chest pain and what steps I should take?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
-{"prompt": "How can I effectively manage my chronic pain?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
-{"prompt": "How do I know when to see a doctor for my persistent [specific symptom]?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

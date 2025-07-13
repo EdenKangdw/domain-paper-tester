@@ -468,6 +468,14 @@ def extract_evidence_with_ollama(prompt, tokens, model_key, domain):
 def get_model_response(model_name, prompt):
     """모델에서 응답을 받아 프롬프트만 반환합니다 (response는 저장하지 않음)"""
     try:
+        # 딥시크 모델은 더 짧은 응답과 빠른 타임아웃
+        if "deepseek" in model_name.lower():
+            num_predict = 80
+            timeout = 10
+        else:
+            num_predict = 150
+            timeout = 15
+            
         response = requests.post(
             f"{OLLAMA_API_BASE}/api/generate",
             json={
@@ -477,10 +485,10 @@ def get_model_response(model_name, prompt):
                 "options": {
                     "temperature": 0.7,
                     "top_p": 0.9,
-                    "num_predict": 200
+                    "num_predict": num_predict
                 }
             },
-            timeout=30
+            timeout=timeout
         )
         
         if response.status_code == 200:

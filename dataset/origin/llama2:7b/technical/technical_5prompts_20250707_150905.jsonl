@@ -1,5 +1,0 @@
-{"prompt": "What is the difference between a CPU and a GPU?", "model": "llama2:7b", "domain": "Technical", "index": 1}
-{"prompt": "What is the difference between a CPU and a GPU in terms of processing power and usage in modern computer systems?", "model": "llama2:7b", "domain": "Technical", "index": 2}
-{"prompt": "What is the difference between 32-bit and 64-bit processing in computer architecture?", "model": "llama2:7b", "domain": "Technical", "index": 3}
-{"prompt": "What is the difference between a RAM and a ROM in computer hardware?", "model": "llama2:7b", "domain": "Technical", "index": 4}
-{"prompt": "What is the difference between 32-bit and 64-bit computing architecture in terms of processing power and memory management?", "model": "llama2:7b", "domain": "Technical", "index": 5}

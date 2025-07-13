@@ -1,5 +1,0 @@
-{"prompt": "Analyze the current state of inflation rates across major economies worldwide, with a focus on how these figures have changed over the past year.", "model": "mistral:7b", "domain": "Economy", "index": 1}
-{"prompt": "Analyze the current state of unemployment rates in major economies around the world, and identify the country with the highest and lowest rates.", "model": "mistral:7b", "domain": "Economy", "index": 2}
-{"prompt": "Analyze the current state of the global economy, focusing on GDP growth rates, inflation levels, unemployment rates, and trade balances in major economies such as the United States, China, Germany, Japan, and India.", "model": "mistral:7b", "domain": "Economy", "index": 3}
-{"prompt": "Analyze the current state of unemployment rates in major economies worldwide.", "model": "mistral:7b", "domain": "Economy", "index": 4}
-{"prompt": "Discuss and compare the current GDP growth rates of the top 5 global economies, including their respective inflation rates.", "model": "mistral:7b", "domain": "Economy", "index": 5}

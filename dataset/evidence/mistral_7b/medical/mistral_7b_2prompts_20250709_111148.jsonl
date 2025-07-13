@@ -1,0 +1,2 @@
+{"prompt": "Describe the common side effects associated with long-term use of Metformin in type 2 diabetes management.", "domain": "Medical", "model": "mistral:7b", "index": 2, "evidence_indices": [10], "evidence_tokens": ["use"], "timestamp": "20250709_111137"}
+{"prompt": "List the most common causes of respiratory failure in critical care settings.", "domain": "Medical", "model": "mistral:7b", "index": 3, "evidence_indices": [9, 11, 12, 13], "evidence_tokens": ["failure", "critical", "care", "settings"], "timestamp": "20250709_111137"}

@@ -1,5 +1,0 @@
-{"prompt": "Identify and summarize the fundamental differences between a civil lawsuit and a criminal prosecution in the legal system.", "model": "mistral:7b", "domain": "Legal", "index": 1}
-{"prompt": "Identify the primary statute governing commercial contracts in the state of New York, and explain its main provisions related to offer, acceptance, consideration, and intent.", "model": "mistral:7b", "domain": "Legal", "index": 2}
-{"prompt": "Outline the primary differences between a contract and a statute in common law jurisdictions, emphasizing their sources, purposes, and how they may impact legal obligations.", "model": "mistral:7b", "domain": "Legal", "index": 3}
-{"prompt": "Identify the primary differences between a class action lawsuit and a mass tort, providing examples of each.", "model": "mistral:7b", "domain": "Legal", "index": 4}
-{"prompt": "Identify the primary legal implications of a breach of contract in a business-to-business scenario, specifically regarding damages, remedies, and potential liability.", "model": "mistral:7b", "domain": "Legal", "index": 5}

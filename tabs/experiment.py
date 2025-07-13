@@ -27,7 +27,7 @@ def get_model_experiment_path(model_name):
 def get_model_dataset_path(model_name):
     """모델별 데이터셋 저장 경로를 반환합니다."""
     safe_model_name = model_name.replace(':', '_').replace('/', '_')
-    return f"dataset/{safe_model_name}"
+    return f"dataset/evidence/{safe_model_name}"
 
 # 글로벌 모델 캐시
 MODEL_CACHE = {
@@ -120,11 +120,11 @@ def get_model_prompts(model_name, domain, filename, max_count=10000):
 
 def copy_original_dataset_to_model(model_name):
     """원본 데이터셋을 모델별 디렉토리로 복사합니다."""
-    original_dataset_path = DATASET_ROOT
+    original_dataset_path = "dataset/evidence"
     model_dataset_path = get_model_dataset_path(model_name)
     
     if not os.path.exists(original_dataset_path):
-        st.error("원본 데이터셋이 존재하지 않습니다.")
+        st.error("원본 evidence 데이터셋이 존재하지 않습니다.")
         return False
     
     try:
@@ -149,10 +149,10 @@ def copy_original_dataset_to_model(model_name):
                             import shutil
                             shutil.copy2(original_file, model_file)
         
-        st.success(f"{model_name} 모델용 데이터셋이 준비되었습니다.")
+        st.success(f"{model_name} 모델용 evidence 데이터셋이 준비되었습니다.")
         return True
     except Exception as e:
-        st.error(f"데이터셋 복사 중 오류 발생: {str(e)}")
+        st.error(f"Evidence 데이터셋 복사 중 오류 발생: {str(e)}")
         return False
 
 # 각 도메인별 데이터셋 파일 목록을 가져오는 함수 (기존 호환성 유지)
@@ -160,7 +160,7 @@ def get_dataset_files():
     domains = ["economy", "technical", "legal", "medical"]
     files = {}
     for domain in domains:
-        domain_path = os.path.join(DATASET_ROOT, domain)
+        domain_path = os.path.join("dataset/evidence", domain)
         if os.path.exists(domain_path):
             files[domain] = [f for f in os.listdir(domain_path) if f.endswith(".jsonl")]
         else:
@@ -169,7 +169,7 @@ def get_dataset_files():
 
 # 선택한 데이터셋 파일에서 프롬프트 리스트를 추출하는 함수 (기존 호환성 유지)
 def get_prompts(domain, filename, max_count=10000):
-    path = os.path.join(DATASET_ROOT, domain, filename)
+    path = os.path.join("dataset/evidence", domain, filename)
     prompts = []
     try:
         with open(path, "r") as f:
@@ -1230,6 +1230,11 @@ def show():
     # 데이터셋 선택 섹션
     st.subheader("📊 Dataset Selection")
     
+    # 데이터셋 경로 정보 표시
+    if selected_models:
+        dataset_path = get_model_dataset_path(selected_models[0])
+        st.info(f"📁 Evidence 데이터셋 경로: `{dataset_path}`")
+    
     # 데이터셋 파일 목록 (캐시된 경우 사용)
     cache_key = f"dataset_files_{selected_model}"
     if cache_key not in st.session_state.dataset_files_cache:
@@ -1251,7 +1256,8 @@ def show():
             )
             selected_files[domain] = selected_file
         else:
-            st.warning(f"{domain.capitalize()} 도메인에 데이터셋 파일이 없습니다.")
+            st.warning(f"{domain.capitalize()} 도메인에 evidence 데이터셋 파일이 없습니다.")
+            st.info(f"💡 Evidence Extractor 탭에서 먼저 evidence를 추출해주세요.")
     
     # 실험 설정
     st.subheader("⚙️ Experiment Settings")

@@ -1,5 +1,0 @@
-{"prompt": "Within the context of primary care, describe the key clinical findings associated with a suspected case of viral encephalitis.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
-{"prompt": "Within the context of oncology, summarize the key clinical findings associated with a specific gene mutation in lung cancer.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
-{"prompt": "Describe the key clinical features associated with a diagnosis of Parkinson's disease.", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
-{"prompt": "Within the context of oncology, what are the key considerations and potential challenges associated with the implementation of personalized immunotherapy for patients with advanced melanoma?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
-{"prompt": "What are the key considerations and potential risks associated with the implementation of artificial intelligence-powered diagnostics in oncology?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

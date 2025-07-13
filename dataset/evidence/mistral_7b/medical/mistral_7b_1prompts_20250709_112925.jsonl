@@ -1,0 +1,1 @@
+{"prompt": "List the most common causes of respiratory failure in critical care settings.", "domain": "Medical", "model": "mistral:7b", "index": 3, "evidence_indices": [9, 13], "evidence_tokens": ["failure", "settings"], "timestamp": "20250709_112915"}

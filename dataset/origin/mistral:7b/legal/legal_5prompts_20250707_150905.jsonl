@@ -1,5 +1,0 @@
-{"prompt": "Does a non-compete clause in my employment contract restrict me from working for competitors within the same geographical area and industry after termination of my employment?", "model": "mistral:7b", "domain": "Legal", "index": 1}
-{"prompt": "Can I terminate the contract without penalty if the other party fails to meet their obligations?", "model": "mistral:7b", "domain": "Legal", "index": 2}
-{"prompt": "Can I legally terminate an employment contract without notice under the terms of my employment agreement?", "model": "mistral:7b", "domain": "Legal", "index": 3}
-{"prompt": "Can I terminate the contract unilaterally, given the breach of conditions by the counterparty?", "model": "mistral:7b", "domain": "Legal", "index": 4}
-{"prompt": "Can I terminate this employment contract without notice or penalty?", "model": "mistral:7b", "domain": "Legal", "index": 5}

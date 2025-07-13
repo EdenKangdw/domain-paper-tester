@@ -1,5 +1,0 @@
-{"prompt": "1. \"What are the common causes of high blood pressure?\"", "model": "mistral:7b", "domain": "Medical", "index": 1}
-{"prompt": "1. \"What are the symptoms of a heart attack and when should I seek immediate medical help?\"", "model": "mistral:7b", "domain": "Medical", "index": 2}
-{"prompt": "1. \"What are the common symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 3}
-{"prompt": "1. \"What are the symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 4}
-{"prompt": "1. \"What are the symptoms of a heart attack?\"", "model": "mistral:7b", "domain": "Medical", "index": 5}

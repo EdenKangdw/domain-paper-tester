@@ -11,7 +11,7 @@ from typing import List, Tuple, Optional, Dict, Any
 
 # 상수 정의
 OLLAMA_API_BASE = "http://localhost:11434"
-TIMEOUT = 30
+TIMEOUT = 15  # 타임아웃을 15초로 단축
 
 # 모델별 토크나이저 매핑
 MODEL_TOKENIZER_MAP = {
@@ -68,7 +68,7 @@ def check_model_status(model_key: str) -> bool:
                     "num_predict": 1
                 }
             },
-            timeout=10
+            timeout=5
         )
         
         if response.status_code == 200:
@@ -113,8 +113,11 @@ def load_file_data(file_path: Path) -> List[Dict[str, Any]]:
 def load_origin_prompts(domain: str, model_key: str = None) -> List[Dict[str, Any]]:
     """도메인별 origin 프롬프트 파일들을 로드합니다."""
     if model_key:
-        # 모델별 도메인 디렉토리에서 로드
+        # 모델별 도메인 디렉토리에서 로드 (콜론을 언더스코어로 변경)
         origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}/{domain.lower()}")
+        if not origin_dir.exists():
+            # 콜론이 그대로인 경우도 시도
+            origin_dir = Path(f"dataset/origin/{model_key}/{domain.lower()}")
     else:
         # 기존 방식 (도메인 직접 디렉토리)
         origin_dir = Path(f"dataset/origin/{domain.lower()}")
@@ -134,8 +137,11 @@ def load_origin_prompts(domain: str, model_key: str = None) -> List[Dict[str, An
 def get_available_files(domain: str, model_key: str = None) -> List[Dict[str, Any]]:
     """도메인별 사용 가능한 파일 목록을 반환합니다."""
     if model_key:
-        # 모델별 도메인 디렉토리에서 로드
+        # 모델별 도메인 디렉토리에서 로드 (콜론을 언더스코어로 변경)
         origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}/{domain.lower()}")
+        if not origin_dir.exists():
+            # 콜론이 그대로인 경우도 시도
+            origin_dir = Path(f"dataset/origin/{model_key}/{domain.lower()}")
     else:
         # 기존 방식 (도메인 직접 디렉토리)
         origin_dir = Path(f"dataset/origin/{domain.lower()}")
@@ -162,8 +168,11 @@ def get_available_files(domain: str, model_key: str = None) -> List[Dict[str, An
 def load_selected_files(domain: str, selected_files: List[str], model_key: str = None) -> List[Dict[str, Any]]:
     """선택된 파일들에서 프롬프트를 로드합니다."""
     if model_key:
-        # 모델별 도메인 디렉토리에서 로드
+        # 모델별 도메인 디렉토리에서 로드 (콜론을 언더스코어로 변경)
         origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}/{domain.lower()}")
+        if not origin_dir.exists():
+            # 콜론이 그대로인 경우도 시도
+            origin_dir = Path(f"dataset/origin/{model_key}/{domain.lower()}")
     else:
         # 기존 방식 (도메인 직접 디렉토리)
         origin_dir = Path(f"dataset/origin/{domain.lower()}")
@@ -180,89 +189,159 @@ def load_selected_files(domain: str, selected_files: List[str], model_key: str =
     
     return all_prompts
 
-def find_token_positions(prompt: str, tokens: List[str], tokenizer) -> List[int]:
-    """프롬프트에서 토큰들의 위치를 찾습니다 (토큰 단위 인덱스)."""
-    try:
-        # 프롬프트를 토큰화
-        tokenized = tokenizer.tokenize(prompt)
-        token_indices = []
-        
-        # 각 evidence 토큰에 대해 토큰 인덱스 찾기
-        for evidence_token in tokens:
-            evidence_token_lower = evidence_token.lower()
-            found_index = -1  # 기본값 -1 (찾지 못함)
-            
-            # 토큰화된 리스트에서 매칭되는 토큰 찾기
-            for i, token in enumerate(tokenized):
-                # Ġ 문자 제거하고 토큰을 디코딩하여 원본 텍스트와 비교
-                clean_token = token.replace('Ġ', '')
-                decoded_token = tokenizer.convert_tokens_to_string([token]).strip()
-                
-                # 디버깅을 위한 로그 추가
-                print(f"   매칭 시도: evidence='{evidence_token_lower}' vs clean_token='{clean_token.lower()}' vs decoded='{decoded_token.lower()}'")
-                
-                # 세 가지 방법 모두 시도
-                if (clean_token.lower() == evidence_token_lower or 
-                    decoded_token.lower() == evidence_token_lower or
-                    token.lower() == evidence_token_lower):
-                    found_index = i
-                    print(f"   ✅ 매칭 성공: {evidence_token_lower} -> 인덱스 {i}")
-                    break  # 첫 번째 매칭만 찾기
-            
-            token_indices.append(found_index)
-        
-        return token_indices
-        
-    except Exception as e:
-        print(f"토큰 위치 찾기 중 오류: {str(e)}")
-        return [-1] * len(tokens)  # 모든 토큰에 대해 -1 반환
+# def find_token_positions(prompt: str, tokens: List[str], tokenizer) -> List[int]:
+#     """프롬프트에서 토큰들의 위치를 찾습니다 (토큰 단위 인덱스)."""
+#     # 이 함수는 더 이상 사용하지 않음 - 원본 프롬프트에서 단순 문자열 매칭으로 대체
+#     pass
 
 def extract_tokens_from_response(response_text: str) -> Optional[List[str]]:
     """모델 응답에서 토큰 리스트를 추출합니다."""
     try:
         print(f"   🔍 토큰 추출 시작: {len(response_text)} 문자 응답")
+        print(f"   원본 응답: {response_text}")
         
-        # JSON 형태의 리스트 추출 시도
         import re
         import ast
+        import json
         
-        # JSON 배열 패턴 찾기
-        list_match = re.search(r'\[[^\]]+\]', response_text)
-        if list_match:
-            print(f"   JSON 배열 패턴 발견: {list_match.group()}")
+        # 1. 가장 정확한 방법: JSON 파싱 시도
+        try:
+            # 전체 응답을 JSON으로 파싱 시도
+            parsed = json.loads(response_text.strip())
+            if isinstance(parsed, list):
+                result = [str(token).strip() for token in parsed if token]
+                print(f"   ✅ JSON 파싱 성공: {len(result)}개 토큰")
+                print(f"   추출된 토큰들: {result}")
+                return result
+        except json.JSONDecodeError:
+            pass
+        
+        # 2. JSON 배열 패턴 찾기 (더 정확한 정규식)
+        # 중첩된 배열도 처리할 수 있도록 개선
+        json_array_pattern = r'\[(?:[^[\]]*|\[(?:[^[\]]*|\[[^[\]]*\])*\])*\]'
+        list_matches = re.findall(json_array_pattern, response_text)
+        
+        for match in list_matches:
             try:
-                evidence_tokens = ast.literal_eval(list_match.group())
-                if isinstance(evidence_tokens, list):
-                    # 문자열만 필터링
+                evidence_tokens = ast.literal_eval(match)
+                if isinstance(evidence_tokens, list) and evidence_tokens:
                     result = [str(token).strip() for token in evidence_tokens if token]
-                    print(f"   ✅ JSON 배열에서 추출: {len(result)}개 토큰")
+                    print(f"   ✅ JSON 배열 패턴에서 추출: {len(result)}개 토큰")
+                    print(f"   매치된 패턴: {match}")
+                    print(f"   추출된 토큰들: {result}")
                     return result
-            except Exception as json_error:
-                print(f"   ❌ JSON 파싱 실패: {str(json_error)}")
-                pass
+            except (ValueError, SyntaxError) as e:
+                print(f"   ⚠️ 패턴 파싱 실패: {match} - {str(e)}")
+                continue
         
-        # 따옴표로 둘러싸인 토큰들 추출
+        # 3. 따옴표로 둘러싸인 토큰들 추출 (더 정확한 패턴)
         print(f"   따옴표 패턴으로 추출 시도...")
+        # JSON 배열 내부의 따옴표만 찾기
         quoted_tokens = re.findall(r'["\']([^"\']+)["\']', response_text)
         if quoted_tokens:
-            result = [token.strip() for token in quoted_tokens if token.strip()]
+            # 중복 제거하고 정리
+            result = list(set([token.strip() for token in quoted_tokens if token.strip()]))
             print(f"   ✅ 따옴표 패턴에서 추출: {len(result)}개 토큰")
+            print(f"   추출된 토큰들: {result}")
             return result
         
-        # 공백으로 구분된 단어들 추출 (마지막 수단)
+        # 4. 대괄호 안의 내용을 직접 파싱
+        print(f"   대괄호 내용 직접 파싱 시도...")
+        bracket_content = re.search(r'\[(.*?)\]', response_text, re.DOTALL)
+        if bracket_content:
+            content = bracket_content.group(1)
+            # 쉼표로 구분된 항목들 추출
+            items = [item.strip().strip('"\'') for item in content.split(',') if item.strip()]
+            if items:
+                result = [item for item in items if item]
+                print(f"   ✅ 대괄호 내용에서 추출: {len(result)}개 토큰")
+                print(f"   추출된 토큰들: {result}")
+                return result
+        
+        # 5. Mistral/Gemma 모델 특화 파싱 (태그 제거 후 파싱)
+        print(f"   Mistral/Gemma 모델 특화 파싱 시도...")
+        
+        # Mistral 모델: <s>[INST] ... [/INST] 태그 제거
+        mistral_cleaned = re.sub(r'<s>\[INST\].*?\[/INST\]', '', response_text, flags=re.DOTALL)
+        mistral_cleaned = mistral_cleaned.strip()
+        
+        # Gemma 모델: <start_of_turn>model ... <end_of_turn> 태그 제거
+        gemma_cleaned = re.sub(r'<start_of_turn>model\s*', '', response_text, flags=re.IGNORECASE)
+        gemma_cleaned = re.sub(r'<end_of_turn>\s*', '', gemma_cleaned, flags=re.IGNORECASE)
+        gemma_cleaned = gemma_cleaned.strip()
+        
+        # Mistral 태그가 제거된 경우
+        if mistral_cleaned != response_text:
+            print(f"   Mistral 태그 제거됨: {len(mistral_cleaned)} 문자")
+            # 제거된 텍스트에서 다시 JSON 파싱 시도
+            try:
+                parsed = json.loads(mistral_cleaned)
+                if isinstance(parsed, list):
+                    result = [str(token).strip() for token in parsed if token]
+                    print(f"   ✅ Mistral 태그 제거 후 JSON 파싱 성공: {len(result)}개 토큰")
+                    print(f"   추출된 토큰들: {result}")
+                    return result
+            except json.JSONDecodeError:
+                pass
+            
+            # Mistral 태그 제거 후 배열 패턴 찾기
+            list_matches = re.findall(json_array_pattern, mistral_cleaned)
+            for match in list_matches:
+                try:
+                    evidence_tokens = ast.literal_eval(match)
+                    if isinstance(evidence_tokens, list) and evidence_tokens:
+                        result = [str(token).strip() for token in evidence_tokens if token]
+                        print(f"   ✅ Mistral 태그 제거 후 배열 패턴에서 추출: {len(result)}개 토큰")
+                        print(f"   추출된 토큰들: {result}")
+                        return result
+                except (ValueError, SyntaxError):
+                    continue
+        
+        # Gemma 태그가 제거된 경우
+        if gemma_cleaned != response_text:
+            print(f"   Gemma 태그 제거됨: {len(gemma_cleaned)} 문자")
+            # 제거된 텍스트에서 다시 JSON 파싱 시도
+            try:
+                parsed = json.loads(gemma_cleaned)
+                if isinstance(parsed, list):
+                    result = [str(token).strip() for token in parsed if token]
+                    print(f"   ✅ Gemma 태그 제거 후 JSON 파싱 성공: {len(result)}개 토큰")
+                    print(f"   추출된 토큰들: {result}")
+                    return result
+            except json.JSONDecodeError:
+                pass
+            
+            # Gemma 태그 제거 후 배열 패턴 찾기
+            list_matches = re.findall(json_array_pattern, gemma_cleaned)
+            for match in list_matches:
+                try:
+                    evidence_tokens = ast.literal_eval(match)
+                    if isinstance(evidence_tokens, list) and evidence_tokens:
+                        result = [str(token).strip() for token in evidence_tokens if token]
+                        print(f"   ✅ Gemma 태그 제거 후 배열 패턴에서 추출: {len(result)}개 토큰")
+                        print(f"   추출된 토큰들: {result}")
+                        return result
+                except (ValueError, SyntaxError):
+                    continue
+        
+        # 6. 마지막 수단: 단어 패턴 (하지만 더 정교하게)
         print(f"   단어 패턴으로 추출 시도...")
-        words = re.findall(r'\b\w+\b', response_text)
+        # JSON 배열 내부의 단어들만 찾기
+        words = re.findall(r'\b[a-zA-Z][a-zA-Z0-9_]*\b', response_text)
         if words:
-            result = [word.strip() for word in words if word.strip()]
+            # 중복 제거하고 정리
+            result = list(set([word.strip() for word in words if word.strip() and len(word) > 1]))
             print(f"   ✅ 단어 패턴에서 추출: {len(result)}개 토큰")
+            print(f"   추출된 토큰들: {result}")
             return result
         
         print(f"   ❌ 모든 추출 방법 실패")
+        print(f"   원본 응답: {response_text}")
         return None
         
     except Exception as e:
         print(f"❌ 토큰 추출 중 오류: {str(e)}")
-        print(f"   응답 텍스트: {response_text[:100]}...")
+        print(f"   응답 텍스트: {response_text}")
         return None
 
 def call_ollama_api(model_key: str, prompt: str) -> Optional[str]:
@@ -271,19 +350,39 @@ def call_ollama_api(model_key: str, prompt: str) -> Optional[str]:
         print(f"   📡 Ollama API 호출: {model_key}")
         print(f"   프롬프트 길이: {len(prompt)} 문자")
         
+        # 모델별 최적화된 파라미터
+        if "mistral" in model_key.lower():
+            options = {
+                "temperature": 0.1,      # Mistral은 더 낮은 temperature에서 더 정확함
+                "top_p": 0.9,            # 더 정확한 응답을 위해
+                "num_predict": 150,      # Mistral은 더 긴 응답이 필요할 수 있음
+                "repeat_penalty": 1.1,   # Mistral은 반복에 덜 민감함
+                "top_k": 5               # 더 집중된 토큰 선택
+            }
+        elif "gemma" in model_key.lower():
+            options = {
+                "temperature": 0.05,     # 더 낮은 temperature로 빠른 응답
+                "top_p": 0.8,            # 더 빠른 응답을 위해
+                "num_predict": 50,       # 더 짧은 응답으로 속도 향상
+                "repeat_penalty": 1.0,   # 반복 방지 최소화
+                "top_k": 3               # 더 집중된 토큰 선택
+            }
+        else:
+            options = {
+                "temperature": 0.3,      # 약간의 다양성을 위해 temperature 증가
+                "top_p": 0.8,            # 더 다양한 응답을 위해 top_p 증가
+                "num_predict": 100,      # 충분한 응답 길이
+                "repeat_penalty": 1.2,   # 반복 방지 강화
+                "top_k": 10              # 더 다양한 토큰 선택
+            }
+        
         response = requests.post(
             f"{OLLAMA_API_BASE}/api/generate",
             json={
                 "model": model_key,
                 "prompt": prompt,
                 "stream": False,
-                "options": {
-                    "temperature": 0.0,  # 더 낮은 temperature로 일관된 응답
-                    "top_p": 0.1,        # 더 낮은 top_p로 확실한 응답
-                    "num_predict": 50,    # 짧은 응답으로 제한
-                    "repeat_penalty": 1.1, # 반복 방지
-                    "top_k": 1           # 가장 확실한 토큰만 선택
-                }
+                "options": options
             },
             timeout=TIMEOUT
         )
@@ -294,7 +393,7 @@ def call_ollama_api(model_key: str, prompt: str) -> Optional[str]:
             result = response.json()
             response_text = result.get("response", "").strip()
             
-            # deepseek 모델의 <think> 태그 제거
+            # 모델별 응답 후처리
             if "deepseek" in model_key.lower():
                 import re
                 # <think>...</think> 태그와 내용 제거
@@ -303,8 +402,32 @@ def call_ollama_api(model_key: str, prompt: str) -> Optional[str]:
                 response_text = re.sub(r'<think>\s*</think>', '', response_text)
                 response_text = response_text.strip()
                 print(f"   ✅ API 호출 성공 (deepseek 태그 제거): {len(response_text)} 문자 응답")
+                print(f"   응답 미리보기: {response_text[:100]}...")
+            elif "mistral" in model_key.lower():
+                import re
+                # Mistral 모델의 특별한 응답 형식 처리
+                # 불필요한 설명이나 추가 텍스트 제거
+                response_text = re.sub(r'Here are the extracted tokens?:?', '', response_text, flags=re.IGNORECASE)
+                response_text = re.sub(r'The extracted tokens are:?', '', response_text, flags=re.IGNORECASE)
+                response_text = re.sub(r'Based on the prompt, the relevant tokens are:?', '', response_text, flags=re.IGNORECASE)
+                response_text = response_text.strip()
+                print(f"   ✅ API 호출 성공 (mistral 후처리): {len(response_text)} 문자 응답")
+                print(f"   응답 미리보기: {response_text[:100]}...")
+            elif "gemma" in model_key.lower():
+                import re
+                # Gemma 모델의 특별한 응답 형식 처리
+                # <start_of_turn>model 태그와 내용 제거
+                response_text = re.sub(r'<start_of_turn>model\s*', '', response_text, flags=re.IGNORECASE)
+                response_text = re.sub(r'<end_of_turn>\s*', '', response_text, flags=re.IGNORECASE)
+                # 불필요한 설명이나 추가 텍스트 제거
+                response_text = re.sub(r'Here are the extracted tokens?:?', '', response_text, flags=re.IGNORECASE)
+                response_text = re.sub(r'The extracted tokens are:?', '', response_text, flags=re.IGNORECASE)
+                response_text = response_text.strip()
+                print(f"   ✅ API 호출 성공 (gemma 후처리): {len(response_text)} 문자 응답")
+                print(f"   응답 미리보기: {response_text[:100]}...")
             else:
                 print(f"   ✅ API 호출 성공: {len(response_text)} 문자 응답")
+                print(f"   응답 미리보기: {response_text[:100]}...")
             
             return response_text
         else:
@@ -332,43 +455,101 @@ def extract_evidence_tokens(prompt: str, model_key: str, domain: str) -> Tuple[L
     try:
         print(f"🔍 Evidence 추출 시작: {domain} 도메인")
         print(f"   프롬프트 길이: {len(prompt)} 문자")
+        print(f"   프롬프트 내용: {prompt[:100]}...")
         
         domain_instruction = DOMAIN_PROMPTS.get(domain.lower(), "Find important tokens related to the domain.")
         print(f"   도메인 지시사항: {domain_instruction}")
         
-        # Evidence 추출을 위한 프롬프트 구성 (강력한 영어 응답 강제)
-        evidence_prompt = f"""
-You are an English-only evidence extraction system. Your task is to extract English tokens from the given prompt.
+        # 프롬프트별 고유한 evidence 추출을 위한 개선된 프롬프트
+        # 프롬프트의 고유성을 보장하기 위해 해시 기반 식별자 추가
+        import hashlib
+        prompt_hash = hashlib.md5(prompt.encode()).hexdigest()[:8]
+        
+        # 모델별 특화 프롬프트
+        if "llama" in model_key.lower():
+            evidence_prompt = f"""<s>[INST] Extract ONLY English words from this prompt that are relevant to the {domain} domain.
 
-DOMAIN: {domain}
-INSTRUCTION: {domain_instruction}
+INPUT: "{prompt}"
 
-INPUT PROMPT: "{prompt}"
-
-CRITICAL RULES:
-1. You MUST respond ONLY in English
-2. You MUST extract ONLY English words that exist in the input prompt
-3. You MUST return ONLY a JSON array format
-4. You MUST NOT translate words
-5. You MUST NOT add words that are not in the prompt
-6. You MUST NOT respond in Korean or any other language
-7. You MUST focus on domain-specific medical/technical terms
+RULES:
+- Extract ONLY single words from the input
+- NO explanations or text
+- NO compound phrases - split "heart attack" into ["heart", "attack"]
+- Return ONLY JSON array
 
 EXAMPLES:
-- For medical domain: ["clinical", "findings", "diagnosis", "viral", "encephalitis", "adults"]
-- For legal domain: ["legal", "contract", "liability", "jurisdiction"]
-- For technical domain: ["algorithm", "implementation", "optimization"]
+- "heart attack symptoms" → ["heart", "attack", "symptoms"]
+- "processing power" → ["processing", "power"]
+
+RESPONSE (JSON only):
+["word1", "word2", "word3"] [/INST]"""
+        elif "mistral" in model_key.lower():
+            evidence_prompt = f"""<s>[INST] You are a token extraction system. Extract ONLY English words from the given prompt that are relevant to the {domain} domain.
+
+INPUT: "{prompt}"
+
+CRITICAL RULES:
+- Extract ONLY single words that exist in the input prompt
+- Return ONLY a JSON array format
+- NO explanations, NO additional text
+- NO compound phrases - split "heart attack" into ["heart", "attack"]
+- Focus on domain-specific terms
+
+EXAMPLES:
+- Medical: ["symptoms", "heart", "attack", "diagnosis"]
+- Legal: ["contract", "liability", "jurisdiction"]
+- Technical: ["algorithm", "implementation", "optimization"]
 
 RESPONSE FORMAT (JSON array only):
-["word1", "word2", "word3"]
+["word1", "word2", "word3"] [/INST]"""
+        elif "gemma" in model_key.lower():
+            evidence_prompt = f"""<start_of_turn>user
+Extract key words from: "{prompt}"
+
+Domain: {domain}
+Format: JSON array only
+Example: ["word1", "word2", "word3"]<end_of_turn>
+<start_of_turn>model
+["word1", "word2", "word3"]<end_of_turn>"""
+        else:
+            evidence_prompt = f"""
+You are an evidence extraction system. Extract the most important English words from the given prompt that are relevant to the {domain} domain.
+
+PROMPT ID: {prompt_hash}
+INPUT PROMPT: "{prompt}"
+
+TASK: Identify 3-8 key words from the prompt that are most important for understanding the {domain} domain question.
+
+RULES:
+1. Extract ONLY words that appear in the input prompt
+2. Focus on domain-specific terms and key concepts
+3. Return ONLY a JSON array of strings
+4. Do not add explanations or other text
+5. Each word should be meaningful and relevant to the domain
+6. Consider the specific content of this prompt (ID: {prompt_hash})
+7. Extract SINGLE words only, not phrases or compound terms
+8. Avoid multi-word expressions like "processing power" - extract "processing" and "power" separately
+
+EXAMPLES:
+- Medical: ["symptoms", "heart", "attack", "diagnosis"]
+- Legal: ["contract", "liability", "jurisdiction", "legal"]
+- Technical: ["algorithm", "implementation", "optimization", "system"]
+- Instead of "processing power", extract: ["processing", "power"]
+- Instead of "memory capacity", extract: ["memory", "capacity"]
+
+RESPONSE (JSON array only):
+["word1", "word2", "word3", "word4"]
 """
         
         print(f"   Ollama API 호출 시작...")
-        # Ollama API 호출
+        # Ollama API 호출 (매번 새로운 응답을 위해 캐시 없이)
         response_text = call_ollama_api(model_key, evidence_prompt)
         if not response_text:
             print(f"❌ No response from Ollama API for model {model_key}")
             return [], []
+        
+        print(f"   프롬프트 ID: {prompt_hash}")
+        print(f"   응답 길이: {len(response_text)} 문자")
         
         print(f"   Ollama API 응답 받음: {len(response_text)} 문자")
         print(f"   응답 미리보기: {response_text[:200]}...")
@@ -382,83 +563,46 @@ RESPONSE FORMAT (JSON array only):
         
         print(f"🔍 Extracted {len(evidence_tokens)} tokens from response: {evidence_tokens}")
         
-        # 영어 토큰만 필터링
-        print(f"   영어 토큰 필터링 시작...")
-        english_tokens = []
+        # 복합어 분리 및 따옴표 처리
+        print(f"   복합어 분리 및 따옴표 처리: {len(evidence_tokens)}개 토큰")
+        print(f"   원본 evidence 토큰: {evidence_tokens}")
+        
+        import re
+        def clean_token(token) -> str:
+            # 알파벳, 숫자, 하이픈만 남기고 모두 제거
+            return ' '.join(re.findall(r'[a-zA-Z0-9-]+', str(token)))
+
+        split_tokens = []
         for token in evidence_tokens:
-            token_clean = token.lower().strip()
-            # 영어 단어만 허용 (한국어, 특수문자 제외)
-            if token_clean and all(c.isascii() and c.isalnum() or c.isspace() for c in token_clean):
-                english_tokens.append(token_clean)
+            token_str = clean_token(token)
+            for t in token_str.split():
+                cleaned = clean_token(t)
+                if cleaned:
+                    split_tokens.append(cleaned)
+        print(f"   복합어+허용문자만 처리 결과: {split_tokens}")
         
-        print(f"   영어 토큰 필터링 결과: {len(english_tokens)}개")
+        # 원본 프롬프트에서 evidence 토큰의 위치 찾기 (단순 문자열 매칭)
+        print(f"   원본 프롬프트에서 evidence 토큰 위치 찾기...")
+        evidence_indices = []
+        evidence_tokens_final = []
         
-        if not english_tokens:
-            print(f"❌ No valid English tokens found after filtering")
-            return [], []
-        
-        print(f"🔍 Found {len(english_tokens)} valid English tokens: {english_tokens}")
-        
-        # 프롬프트를 소문자로 변환하여 매칭
-        print(f"   프롬프트 매칭 시작...")
-        prompt_lower = prompt.lower()
-        valid_tokens = []
-        
-        for token in english_tokens:
-            # 프롬프트에 실제로 존재하는지 확인 (단어 경계 고려)
-            if token in prompt_lower:
-                # 원본 프롬프트에서 정확한 토큰 찾기
-                import re
-                pattern = r'\b' + re.escape(token) + r'\b'
-                if re.search(pattern, prompt_lower):
-                    valid_tokens.append(token)
-        
-        print(f"   프롬프트 매칭 결과: {len(valid_tokens)}개")
-        
-        if not valid_tokens:
-            print(f"❌ No tokens matched in prompt after word boundary check")
-            return [], []
-        
-        print(f"🔍 Found {len(valid_tokens)} tokens that match in prompt: {valid_tokens}")
-        
-        # 토크나이저 로드 (선택적)
-        print(f"   토크나이저 로드 시작...")
-        tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
-        print(f"{model_key} : {tokenizer_name}")
-        
-        if tokenizer_name:
+        for token in split_tokens:
             try:
-                tokenizer = load_tokenizer_cached(tokenizer_name)
-                print(f"   토크나이저 로드 완료: {tokenizer_name}")
-                
-                # 토큰 위치 찾기 (토큰 단위 인덱스)
-                print(f"   토큰 위치 찾기 시작...")
-                indices = find_token_positions(prompt, valid_tokens, tokenizer)
-                print(f"   토큰 위치 찾기 결과: {indices}")
-                
-                # 유효한 인덱스만 필터링 (-1이 아닌 것들)
-                valid_indices = [idx for idx in indices if idx != -1]
-                valid_tokens_with_indices = [token for i, token in enumerate(valid_tokens) if indices[i] != -1]
-                
-                print(f"🔍 Final result: {len(valid_indices)} indices, {len(valid_tokens_with_indices)} tokens")
-                print(f"   최종 evidence 토큰: {valid_tokens_with_indices}")
-                print(f"   최종 evidence 인덱스: {valid_indices}")
-                
-                return valid_indices, valid_tokens_with_indices
-                
+                index = prompt.lower().find(token.lower())
+                if index != -1:
+                    evidence_indices.append(index)
+                    evidence_tokens_final.append(token)
+                    print(f"   ✅ '{token}' 발견: 인덱스 {index}")
+                else:
+                    print(f"   ⚠️ '{token}' 프롬프트에서 찾을 수 없음")
             except Exception as e:
-                print(f"   ⚠️ 토크나이저 로드 실패, 더미 인덱스 사용: {str(e)}")
-                # 토크나이저 로드 실패 시 더미 인덱스 사용
-                dummy_indices = list(range(len(valid_tokens)))
-                print(f"   🔍 Using dummy indices: {dummy_indices}")
-                return dummy_indices, valid_tokens
-        else:
-            print(f"   ⚠️ Tokenizer not found for model {model_key}")
-            
-            # 토크나이저가 없는 모델의 경우 더미 인덱스 사용
-            dummy_indices = list(range(len(valid_tokens)))
-            print(f"   🔍 Using dummy indices: {dummy_indices}")
-            return dummy_indices, valid_tokens
+                print(f"   ❌ '{token}' 처리 중 오류: {str(e)}")
+        
+        print(f"🔍 Final result: {len(evidence_indices)} indices, {len(evidence_tokens_final)} tokens")
+        print(f"   최종 evidence 토큰: {evidence_tokens_final}")
+        print(f"   최종 evidence 인덱스: {evidence_indices}")
+        
+        return evidence_indices, evidence_tokens_final
         
     except Exception as e:
         print(f"❌ Evidence 추출 중 오류: {str(e)}")
@@ -493,16 +637,8 @@ def process_single_prompt_multi_models(prompt_data: Dict[str, Any], model_keys: 
             print(f"   프롬프트 길이: {len(prompt_data['prompt'])} 문자")
             print(f"   프롬프트 미리보기: {prompt_data['prompt'][:100]}...")
             
-            # 토크나이저 이름 확인
-            tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
-            if not tokenizer_name:
-                print(f"   ⚠️ Tokenizer not found for model {model_key}")
-                continue
-            
-            # 토크나이저 로드
-            tokenizer = load_tokenizer_cached(tokenizer_name)
-            tokens = tokenizer.tokenize(prompt_data["prompt"])
-            print(f"   토크나이징 완료: {len(tokens)}개 토큰")
+            # 모델 상태 확인 (토크나이저 불필요)
+            print(f"   모델 {model_key} 준비 완료")
             
             # Evidence 추출
             print(f"   Evidence 추출 시작...")
@@ -537,50 +673,63 @@ def process_single_prompt_multi_models(prompt_data: Dict[str, Any], model_keys: 
     
     return results
 
-def process_single_prompt(prompt_data: Dict[str, Any], model_key: str, domain: str, tokenizer_name: str) -> Dict[str, Any]:
+def process_single_prompt(prompt_data: Dict[str, Any], model_key: str, domain: str) -> Dict[str, Any]:
     """단일 프롬프트를 처리합니다. (단일 모델용 - 호환성 유지)"""
-    try:
-        prompt = prompt_data["prompt"]
-        print(f"🔍 프롬프트 처리 시작: {domain} 도메인")
-        print(f"   프롬프트 길이: {len(prompt)} 문자")
-        print(f"   프롬프트 미리보기: {prompt[:100]}...")
-        
-        # 토크나이저 로드
-        tokenizer = load_tokenizer_cached(tokenizer_name)
-        tokens = tokenizer.tokenize(prompt)
-        print(f"   토크나이징 완료: {len(tokens)}개 토큰")
-        
-        # Evidence 추출
-        print(f"   Evidence 추출 시작...")
-        evidence_indices, evidence_tokens = extract_evidence_tokens(prompt, model_key, domain)
-        print(f"   Evidence 추출 결과: {len(evidence_indices)}개 인덱스, {len(evidence_tokens)}개 토큰")
-        
-        # Evidence 추출 결과 확인
-        if not evidence_tokens:
-            print(f"   ⚠️ No evidence tokens extracted for prompt: {prompt[:50]}...")
-            return None
-        
-        # response 필드 제거하고 필요한 필드만 포함
-        cleaned_data = {
-            "prompt": prompt_data["prompt"],
-            "domain": prompt_data.get("domain", domain),
-            "model": model_key,
-            "index": prompt_data.get("index", 0),
-            "evidence_indices": evidence_indices,
-            "evidence_tokens": evidence_tokens,
-            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
-        }
-        
-        print(f"   ✅ 프롬프트 처리 완료: {len(evidence_tokens)}개 evidence 토큰")
-        return cleaned_data
-        
-    except Exception as e:
-        print(f"   ❌ 프롬프트 처리 중 오류: {str(e)}")
-        print(f"   Prompt: {prompt_data.get('prompt', '')[:50]}...")
-        print(f"   Domain: {domain}")
-        print(f"   Model: {model_key}")
-        print(f"   Tokenizer: {tokenizer_name}")
-        return None
+    max_retries = 2  # 최대 재시도 횟수
+    
+    for attempt in range(max_retries + 1):
+        try:
+            prompt = prompt_data["prompt"]
+            if attempt > 0:
+                print(f"   🔄 재시도 {attempt}/{max_retries}: {domain} 도메인")
+            else:
+                print(f"🔍 프롬프트 처리 시작: {domain} 도메인")
+            print(f"   프롬프트 길이: {len(prompt)} 문자")
+            print(f"   프롬프트 미리보기: {prompt[:100]}...")
+            
+            # Evidence 추출 (토크나이저 없이)
+            print(f"   Evidence 추출 시작...")
+            evidence_indices, evidence_tokens = extract_evidence_tokens(prompt, model_key, domain)
+            print(f"   Evidence 추출 결과: {len(evidence_indices)}개 인덱스, {len(evidence_tokens)}개 토큰")
+            
+            # Evidence 추출 결과 확인
+            if not evidence_tokens:
+                print(f"   ⚠️ No evidence tokens extracted for prompt: {prompt[:50]}...")
+                if attempt < max_retries:
+                    print(f"   🔄 재시도 중... (잠시 대기)")
+                    time.sleep(1)  # 1초 대기
+                    continue
+                return None
+            
+            # response 필드 제거하고 필요한 필드만 포함
+            cleaned_data = {
+                "prompt": prompt_data["prompt"],
+                "domain": prompt_data.get("domain", domain),
+                "model": model_key,
+                "index": prompt_data.get("index", 0),
+                "evidence_indices": evidence_indices,
+                "evidence_tokens": evidence_tokens,
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
+            }
+            
+            print(f"   ✅ 프롬프트 처리 완료: {len(evidence_tokens)}개 evidence 토큰")
+            return cleaned_data
+            
+        except Exception as e:
+            print(f"   ❌ 프롬프트 처리 중 오류 (시도 {attempt + 1}/{max_retries + 1}): {str(e)}")
+            print(f"   Prompt: {prompt_data.get('prompt', '')[:50]}...")
+            print(f"   Domain: {domain}")
+            print(f"   Model: {model_key}")
+            
+            if attempt < max_retries:
+                print(f"   🔄 재시도 중... (잠시 대기)")
+                time.sleep(2)  # 2초 대기
+                continue
+            else:
+                print(f"   ❌ 최대 재시도 횟수 초과")
+                return None
+    
+    return None
 
 def save_domain_data(domain: str, domain_data: List[Dict[str, Any]], model_key: str, timestamp: str) -> Tuple[Path, int]:
     """도메인 데이터를 파일로 저장합니다."""
@@ -589,7 +738,7 @@ def save_domain_data(domain: str, domain_data: List[Dict[str, Any]], model_key: 
         
         # 모델명에서 콜론을 언더스코어로 변경 (파일 시스템 호환성)
         safe_model_key = model_key.replace(":", "_")
-        output_dir = Path(f"dataset/{safe_model_key}/{domain.lower()}")
+        output_dir = Path(f"dataset/evidence/{safe_model_key}/{domain.lower()}")
         
         print(f"📁 출력 디렉토리: {output_dir}")
         
@@ -731,12 +880,8 @@ def show():
                     st.error(f"❌ {model} - 사용 불가")
             
             with col_status4:
-                # 토크나이저 이름 확인
-                tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
-                if tokenizer_name:
-                    st.success(f"🔧 {model} - 토크나이저 지원")
-                else:
-                    st.warning(f"⚠️ {model} - 토크나이저 없음")
+                # 모델 상태 확인 (토크나이저 불필요)
+                st.success(f"🔧 {model} - 준비 완료")
         
         # 모든 모델이 사용 가능한지 확인
         all_available = all(check_model_status(model) for model in selected_models)
@@ -765,7 +910,38 @@ def show():
         st.error("❌ `dataset/origin` 디렉토리가 존재하지 않습니다. 먼저 도메인 프롬프트를 생성해주세요.")
         return
     
-    available_domains = [d.name for d in origin_dir.iterdir() if d.is_dir()]
+    # 모델별 도메인 확인
+    if experiment_mode == "단일 모델 추출" and model_key:
+        # 단일 모델의 경우 해당 모델의 도메인만 확인
+        model_origin_dir = Path(f"dataset/origin/{model_key.replace(':', '_')}")
+        if not model_origin_dir.exists():
+            # 콜론이 그대로인 경우도 시도
+            model_origin_dir = Path(f"dataset/origin/{model_key}")
+        
+        if model_origin_dir.exists():
+            available_domains = [d.name for d in model_origin_dir.iterdir() if d.is_dir()]
+        else:
+            # 모델별 디렉토리가 없으면 기존 방식 사용
+            available_domains = [d.name for d in origin_dir.iterdir() if d.is_dir()]
+    else:
+        # 다중 모델의 경우 모든 모델의 도메인을 합쳐서 확인
+        all_domains = set()
+        for model in selected_models:
+            model_origin_dir = Path(f"dataset/origin/{model.replace(':', '_')}")
+            if not model_origin_dir.exists():
+                # 콜론이 그대로인 경우도 시도
+                model_origin_dir = Path(f"dataset/origin/{model}")
+            
+            if model_origin_dir.exists():
+                model_domains = [d.name for d in model_origin_dir.iterdir() if d.is_dir()]
+                all_domains.update(model_domains)
+        
+        # 모델별 디렉토리가 없으면 기존 방식 사용
+        if not all_domains:
+            available_domains = [d.name for d in origin_dir.iterdir() if d.is_dir()]
+        else:
+            available_domains = list(all_domains)
+    
     if not available_domains:
         st.error("❌ 사용 가능한 도메인이 없습니다. 먼저 도메인 프롬프트를 생성해주세요.")
         return
@@ -790,12 +966,26 @@ def show():
         st.subheader("📊 Domain Information")
         
         for domain in available_domains:
-            prompts = load_origin_prompts(domain)
-            col5, col6 = st.columns([3, 1])
-            with col5:
-                st.write(f"📄 **{domain}** 도메인")
-            with col6:
-                st.write(f"📝 {len(prompts)}개 프롬프트")
+            # 모델별 도메인 정보 표시
+            if experiment_mode == "단일 모델 추출" and model_key:
+                prompts = load_origin_prompts(domain, model_key)
+                col5, col6 = st.columns([3, 1])
+                with col5:
+                    st.write(f"📄 **{domain}** 도메인 ({model_key})")
+                with col6:
+                    st.write(f"📝 {len(prompts)}개 프롬프트")
+            else:
+                # 다중 모델 또는 모델 미선택 시 모든 모델 정보 표시
+                total_prompts = 0
+                for model in selected_models:
+                    prompts = load_origin_prompts(domain, model)
+                    total_prompts += len(prompts)
+                
+                col5, col6 = st.columns([3, 1])
+                with col5:
+                    st.write(f"📄 **{domain}** 도메인")
+                with col6:
+                    st.write(f"📝 {total_prompts}개 프롬프트 (전체 모델)")
         
         st.info("💡 도메인 정보를 다시 보려면 '📊 도메인 정보 보기' 버튼을 클릭하세요.")
     
@@ -897,9 +1087,9 @@ def show():
                         preview_prompt_data = preview_prompts[preview_index]
                         preview_prompt = preview_prompt_data["prompt"]
                         
-                        # 토크나이징
-                        tokenizer = load_tokenizer_cached(tokenizer_name)
-                        tokens = tokenizer.tokenize(preview_prompt)
+                        # 프롬프트 분석 (토크나이저 없이)
+                        prompt_words = preview_prompt.split()
+                        print(f"프롬프트 분석: {len(prompt_words)}개 단어")
                         
                         # Evidence 추출
                         evidence_indices, evidence_tokens = extract_evidence_tokens(
@@ -949,16 +1139,13 @@ def show():
                         st.markdown("### 📄 Original Prompt")
                         st.text_area("", preview_prompt, height=100, key="preview_prompt_multi")
                         
-                        # 토크나이징 결과 (첫 번째 모델 기준)
+                        # 프롬프트 분석 (토크나이저 없이)
                         if preview_models:
                             first_model = preview_models[0]
-                            tokenizer_name = MODEL_TOKENIZER_MAP.get(first_model)
-                            if tokenizer_name:
-                                tokenizer = load_tokenizer_cached(tokenizer_name)
-                                tokens = tokenizer.tokenize(preview_prompt)
-                                st.write(f"**토크나이징 결과 (참고용, {first_model} 기준):**")
-                                st.write(f"총 {len(tokens)}개 토큰")
-                                st.text_area("", str(tokens[:20]) + "..." if len(tokens) > 20 else str(tokens), height=100, key="preview_tokens_multi")
+                            prompt_words = preview_prompt.split()
+                            st.write(f"**프롬프트 분석 (참고용, {first_model} 기준):**")
+                            st.write(f"총 {len(prompt_words)}개 단어")
+                            st.text_area("", str(prompt_words[:20]) + "..." if len(prompt_words) > 20 else str(prompt_words), height=100, key="preview_words_multi")
         
         # 단일 모델 미리보기 결과 표시
         if experiment_mode == "단일 모델 추출" and 'preview_prompt' in locals():
@@ -970,9 +1157,10 @@ def show():
                 st.write("**원본 프롬프트:**")
                 st.text_area("", preview_prompt, height=100, key="preview_prompt")
                 
-                st.write("**토크나이징 결과 (참고용):**")
-                st.write(f"총 {len(tokens)}개 토큰")
-                st.text_area("", str(tokens[:20]) + "..." if len(tokens) > 20 else str(tokens), height=100, key="preview_tokens")
+                st.write("**프롬프트 분석 (참고용):**")
+                prompt_words = preview_prompt.split()
+                st.write(f"총 {len(prompt_words)}개 단어")
+                st.text_area("", str(prompt_words[:20]) + "..." if len(prompt_words) > 20 else str(prompt_words), height=100, key="preview_words")
             
             with col8:
                 st.write("**추출된 Evidence 토큰:**")
@@ -1044,14 +1232,15 @@ RESPONSE FORMAT (JSON array only):
                 
                 col11, col12 = st.columns(2)
                 with col11:
-                    st.write("**토큰화 결과 (인덱스 표시):**")
-                    tokenized = tokenizer.tokenize(preview_prompt)
-                    indexed_tokens = ""
-                    for i, token in enumerate(tokenized):
-                        if i % 5 == 0:
-                            indexed_tokens += f"\n{i:3d}: "
-                        indexed_tokens += f"{token} "
-                    st.text_area("", indexed_tokens, height=200, key="indexed_tokens")
+                    st.write("**원본 프롬프트 분석:**")
+                    prompt_analysis = f"프롬프트 길이: {len(preview_prompt)} 문자\n"
+                    prompt_analysis += f"단어 수: {len(preview_prompt.split())}개\n"
+                    prompt_analysis += f"문자별 분석:\n"
+                    for i, char in enumerate(preview_prompt[:100]):  # 처음 100자만
+                        if i % 20 == 0:
+                            prompt_analysis += f"\n{i:3d}: "
+                        prompt_analysis += char
+                    st.text_area("", prompt_analysis, height=200, key="prompt_analysis")
                 
                 with col12:
                     st.write("**Evidence 토큰 위치 확인 (토큰 단위):**")
@@ -1065,19 +1254,14 @@ RESPONSE FORMAT (JSON array only):
                         if token_clean and all(c.isascii() and c.isalnum() or c.isspace() for c in token_clean):
                             english_tokens.append(token_clean)
                     
-                    # 각 토큰에 대한 인덱스 찾기
-                    all_indices = find_token_positions(preview_prompt, english_tokens, tokenizer)
-                    
-                    for i, (token, idx) in enumerate(zip(english_tokens, all_indices)):
-                        if idx != -1 and idx < len(tokenized):
-                            actual_token = tokenized[idx]
-                            # Ġ 문자 제거하여 표시
-                            clean_actual_token = actual_token.replace('Ġ', '')
-                            position_info.append(f"'{token}' at token pos {idx}: '{clean_actual_token}' ✅")
-                        elif idx == -1:
-                            position_info.append(f"'{token}': not found in tokens ❌")
+                    # 각 토큰에 대한 인덱스 찾기 (원본 프롬프트에서 단순 매칭)
+                    position_info = []
+                    for token in english_tokens:
+                        index = preview_prompt.lower().find(token.lower())
+                        if index != -1:
+                            position_info.append(f"'{token}' at char pos {index}: '{preview_prompt[index:index+len(token)]}' ✅")
                         else:
-                            position_info.append(f"'{token}' at token pos {idx}: index out of range ❌")
+                            position_info.append(f"'{token}': not found in prompt ❌")
                     
                     st.text_area("", "\n".join(position_info), height=200, key="position_info")
                 
@@ -1131,10 +1315,6 @@ RESPONSE FORMAT (JSON array only):
     with col12:
         if st.button("🗑️ 캐시 초기화", key="clear_cache_evidence"):
             get_available_models.clear()
-            load_tokenizer_cached.clear()  # 토크나이저 캐시도 초기화
-            keys_to_remove = [key for key in st.session_state.keys() if key.startswith('tokenizer_')]
-            for key in keys_to_remove:
-                del st.session_state[key]
             st.success("캐시가 초기화되었습니다!")
     
     # ===== Evidence 추출 실행 =====
@@ -1154,13 +1334,8 @@ RESPONSE FORMAT (JSON array only):
                     st.warning("💡 Model Loader 탭에서 모델을 먼저 실행해주세요.")
                     return
                 
-                # 토크나이저 확인
-                tokenizer_name = MODEL_TOKENIZER_MAP.get(model_key)
-                if tokenizer_name:
-                    st.success(f"✅ 토크나이저: {tokenizer_name}")
-                else:
-                    st.error(f"❌ 토크나이저를 찾을 수 없음: {model_key}")
-                    return
+                # 모델 상태만 확인 (토크나이저 불필요)
+                st.success(f"✅ 모델 {model_key} 준비 완료")
             else:
                 # 다중 모델 체크
                 for model in selected_models:
@@ -1170,12 +1345,8 @@ RESPONSE FORMAT (JSON array only):
                     else:
                         st.warning(f"⚠️ 모델 {model} 실행되지 않음 (자동 로드 시도)")
                     
-                    # 토크나이저 확인
-                    tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
-                    if tokenizer_name:
-                        st.success(f"✅ {model} 토크나이저: {tokenizer_name}")
-                    else:
-                        st.warning(f"⚠️ {model} 토크나이저 없음")
+                    # 모델 상태만 확인 (토크나이저 불필요)
+                    st.success(f"✅ {model} 준비 완료")
             
             # 2. 도메인별 프롬프트 확인
             for domain in selected_domains:
@@ -1273,9 +1444,17 @@ RESPONSE FORMAT (JSON array only):
                             else:
                                 time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
                             
-                            # 단일 프롬프트 처리
-                            tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
-                            processed_item = process_single_prompt(prompt_data, model, domain, tokenizer_name)
+                            # 단일 프롬프트 처리 (배치 크기 제한)
+                            batch_size = 50  # 50개씩 처리하여 메모리 부하 감소
+                            
+                            # 배치 단위로 처리
+                            if i % batch_size == 0:
+                                print(f"📦 배치 처리 시작: {i+1}-{min(i+batch_size, len(prompts))}/{len(prompts)}")
+                                # 배치 간 잠시 대기 (메모리 정리)
+                                if i > 0:
+                                    time.sleep(0.5)
+                            
+                            processed_item = process_single_prompt(prompt_data, model, domain)
                             if processed_item:
                                 final_datasets.append(processed_item)
                                 # 디버깅: 성공한 경우 로그
@@ -1288,7 +1467,7 @@ RESPONSE FORMAT (JSON array only):
                                     print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
                                     print(f"   Domain: {domain}")
                                     print(f"   Model: {model}")
-                                    print(f"   Tokenizer: {tokenizer_name}")
+                                    print(f"   Evidence extraction failed")
                                 if (i + 1) % 10 == 0:
                                     print(f"❌ Failed {i+1}/{len(prompts)} prompts in {model} - {domain} domain")
                         
@@ -1296,6 +1475,9 @@ RESPONSE FORMAT (JSON array only):
                         model_domain_end_time = time.time()
                         model_domain_duration = model_domain_end_time - model_domain_start_time
                         print(f"{model} - {domain} domain evidence extraction completed in {model_domain_duration:.2f} seconds")
+                        
+                        # 작업 완료 카운터 증가
+                        completed_tasks += 1
                 
                 else:
                     # 다중 모델 처리 - 현재 모델만 처리
@@ -1331,8 +1513,9 @@ RESPONSE FORMAT (JSON array only):
                                 time_info.text(f"소요시간: {elapsed_time:.1f}초 | 예상완료: 계산 중...")
                             
                             # 단일 모델로 프롬프트 처리
-                            tokenizer_name = MODEL_TOKENIZER_MAP.get(model)
-                            processed_item = process_single_prompt(prompt_data, model, domain, tokenizer_name)
+                            print(f"🔧 Processing prompt {i+1}/{len(prompts)} in {model} - {domain} domain")
+                            
+                            processed_item = process_single_prompt(prompt_data, model, domain)
                             if processed_item:
                                 final_datasets.append(processed_item)
                                 # 디버깅: 성공한 경우 로그
@@ -1345,7 +1528,7 @@ RESPONSE FORMAT (JSON array only):
                                     print(f"   Prompt: {prompt_data.get('prompt', '')[:100]}...")
                                     print(f"   Domain: {domain}")
                                     print(f"   Model: {model}")
-                                    print(f"   Tokenizer: {tokenizer_name}")
+                                    print(f"   Evidence extraction failed")
                                 if (i + 1) % 10 == 0:
                                     print(f"❌ Failed {i+1}/{len(prompts)} prompts in {model} - {domain} domain")
                         
@@ -1383,14 +1566,42 @@ RESPONSE FORMAT (JSON array only):
                 print(f"     - Model: {first_data.get('model', 'N/A')}")
                 print(f"     - Evidence tokens: {first_data.get('evidence_tokens', [])}")
                 print(f"     - Evidence indices: {first_data.get('evidence_indices', [])}")
+                
+                # 모든 데이터의 모델 정보 확인
+                print(f"   - 모든 데이터의 모델 정보:")
+                model_info = {}
+                for i, data in enumerate(final_datasets):
+                    model = data.get('model', 'N/A')
+                    domain = data.get('domain', 'N/A')
+                    if model not in model_info:
+                        model_info[model] = {'count': 0, 'domains': set()}
+                    model_info[model]['count'] += 1
+                    model_info[model]['domains'].add(domain)
+                    
+                    # 처음 5개만 상세 출력
+                    if i < 5:
+                        print(f"     [{i}] Model: {model}, Domain: {domain}, Evidence tokens: {len(data.get('evidence_tokens', []))}")
+                
+                print(f"   - 모델별 요약:")
+                for model, info in model_info.items():
+                    domains_str = ', '.join(sorted(info['domains']))
+                    print(f"     {model}: {info['count']}개 ({domains_str})")
+            else:
+                print(f"   - final_datasets이 비어있습니다!")
+                print(f"   - 선택된 모델들: {selected_models}")
+                print(f"   - 선택된 도메인들: {selected_domains}")
             
-            # 도메인별 데이터 분포 확인
+            # 도메인별 및 모델별 데이터 분포 확인
             domain_distribution = {}
+            model_distribution = {}
             for item in final_datasets:
                 domain = item.get('domain', 'unknown')
+                model = item.get('model', 'unknown')
                 domain_distribution[domain] = domain_distribution.get(domain, 0) + 1
+                model_distribution[model] = model_distribution.get(model, 0) + 1
             
             print(f"   - 도메인별 분포: {domain_distribution}")
+            print(f"   - 모델별 분포: {model_distribution}")
             
             # 각 도메인별 처리 결과 표시
             for domain in selected_domains:
@@ -1406,8 +1617,23 @@ RESPONSE FORMAT (JSON array only):
                     prompts = load_origin_prompts(domain)
                     if prompts:
                         st.warning(f"   - 원본 프롬프트: {len(prompts)}개 존재")
-                        st.warning(f"   - 모델 상태: {'실행 중' if model_key in get_running_models() else '실행되지 않음'}")
-                        st.warning(f"   - 토크나이저: {MODEL_TOKENIZER_MAP.get(model_key, '없음')}")
+                        if experiment_mode == "단일 모델 추출":
+                            st.warning(f"   - 모델 상태: {'실행 중' if model_key in get_running_models() else '실행되지 않음'}")
+                            st.warning(f"   - 토크나이저: {MODEL_TOKENIZER_MAP.get(model_key, '없음')}")
+                        else:
+                            st.warning(f"   - 선택된 모델들: {', '.join(selected_models)}")
+            
+            # 다중 모델인 경우 모델별 처리 결과도 표시
+            if experiment_mode == "다중 모델 추출":
+                st.markdown("**📊 모델별 처리 결과**")
+                for model in selected_models:
+                    model_data = [item for item in final_datasets if item["model"] == model]
+                    if model_data:
+                        st.success(f"✅ {model}: {len(model_data)}개 데이터 처리 완료")
+                        print(f"✅ {model}: {len(model_data)}개 데이터 확인됨")
+                    else:
+                        st.error(f"❌ {model}: 데이터 처리 실패")
+                        print(f"❌ {model}: 데이터 없음")
             
             # 도메인별로 파일 저장
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1523,12 +1749,12 @@ RESPONSE FORMAT (JSON array only):
                 # 출력 디렉토리 정보
                 if experiment_mode == "단일 모델 추출":
                     safe_model_key = model_key.replace(":", "_")
-                    st.info(f"📁 모든 파일이 `dataset/{safe_model_key}/` 디렉토리에 저장되었습니다.")
+                    st.info(f"📁 모든 파일이 `dataset/evidence/{safe_model_key}/` 디렉토리에 저장되었습니다.")
                 else:
-                    st.info(f"📁 각 모델별로 `dataset/[모델명]/` 디렉토리에 저장되었습니다.")
+                    st.info(f"📁 각 모델별로 `dataset/evidence/[모델명]/` 디렉토리에 저장되었습니다.")
                     for model in selected_models:
                         safe_model_key = model.replace(":", "_")
-                        st.info(f"   - {model}: `dataset/{safe_model_key}/`")
+                        st.info(f"   - {model}: `dataset/evidence/{safe_model_key}/`")
                 
                 # 파일 크기 정보 표시
                 st.markdown("---")

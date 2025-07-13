@@ -1,5 +1,0 @@
-{"prompt": "1. \"Can you explain how to optimize a SQL query for better performance?\"", "model": "mistral:7b", "domain": "Technical", "index": 1}
-{"prompt": "1. \"What programming languages are best suited for web development?\"", "model": "mistral:7b", "domain": "Technical", "index": 2}
-{"prompt": "1. \"How do I troubleshoot a slow internet connection?\"", "model": "mistral:7b", "domain": "Technical", "index": 3}
-{"prompt": "1. \"How do I troubleshoot a slow computer performance issue?\"", "model": "mistral:7b", "domain": "Technical", "index": 4}
-{"prompt": "1. \"How do I troubleshoot a slow computer performance issue?\"", "model": "mistral:7b", "domain": "Technical", "index": 5}

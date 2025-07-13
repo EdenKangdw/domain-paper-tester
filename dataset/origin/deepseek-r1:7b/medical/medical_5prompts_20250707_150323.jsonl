@@ -1,5 +1,0 @@
-{"prompt": "What is the chance that my recently diagnosed cancer will come back?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 1}
-{"prompt": "Is my persistent headache due to stress or another underlying issue?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 2}
-{"prompt": "How can I get help to figure out what my symptoms mean?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 3}
-{"prompt": "Is my current medication still effective for managing my condition?", "model": "deepseek-r1:7b", "domain": "Medical", "index": 4}
-{"prompt": "What are the potential long-term side effects or risks associated with chemotherapy?\"", "model": "deepseek-r1:7b", "domain": "Medical", "index": 5}

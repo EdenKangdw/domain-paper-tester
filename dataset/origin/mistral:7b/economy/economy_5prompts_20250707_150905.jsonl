@@ -1,5 +1,0 @@
-{"prompt": "What factors influence the volatility of financial markets?", "model": "mistral:7b", "domain": "Economy", "index": 1}
-{"prompt": "How do interest rate changes affect bond prices?", "model": "mistral:7b", "domain": "Economy", "index": 2}
-{"prompt": "What factors influence the volatility of stock market indices?", "model": "mistral:7b", "domain": "Economy", "index": 3}
-{"prompt": "What is the primary difference between an equity and a bond in financial markets?", "model": "mistral:7b", "domain": "Economy", "index": 4}
-{"prompt": "Can the Efficiency-Wage Theory explain differences in wage levels across similar firms?", "model": "mistral:7b", "domain": "Economy", "index": 5}

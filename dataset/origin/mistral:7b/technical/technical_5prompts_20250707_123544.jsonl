@@ -1,5 +1,0 @@
-{"prompt": "1. \"What is the difference between TCP and UDP protocols?\"", "model": "mistral:7b", "domain": "Technical", "index": 1}
-{"prompt": "1. \"What programming languages should I learn for web development?\"", "model": "mistral:7b", "domain": "Technical", "index": 2}
-{"prompt": "1. How do I troubleshoot a slow computer performance issue?", "model": "mistral:7b", "domain": "Technical", "index": 3}
-{"prompt": "1. \"What are the key differences between SQL and NoSQL databases?\"", "model": "mistral:7b", "domain": "Technical", "index": 4}
-{"prompt": "1. \"What programming languages are best for web development?\"", "model": "mistral:7b", "domain": "Technical", "index": 5}

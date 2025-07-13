@@ -1,5 +1,0 @@
-{"prompt": "Doctor, I've been experiencing persistent coughing and chest tightness - could it be pneumonia?", "model": "llama2:7b", "domain": "Medical", "index": 1}
-{"prompt": "What is the best treatment option for my persistent back pain?", "model": "llama2:7b", "domain": "Medical", "index": 2}
-{"prompt": "Can you please explain why I've been experiencing persistent coughing and shortness of breath despite taking my medication as prescribed?", "model": "llama2:7b", "domain": "Medical", "index": 3}
-{"prompt": "Doctor, I've been experiencing persistent abdominal pain and discomfort. Can you determine the cause and recommend appropriate treatment?", "model": "llama2:7b", "domain": "Medical", "index": 4}
-{"prompt": "Can you tell me if I have cancer?", "model": "llama2:7b", "domain": "Medical", "index": 5}

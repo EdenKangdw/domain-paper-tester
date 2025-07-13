@@ -1,5 +1,0 @@
-{"prompt": "What is the impact of monopolistic competition on market prices and consumer welfare?", "model": "llama2:7b", "domain": "Economy", "index": 1}
-{"prompt": "What is the optimal level of diversification for an investor in a portfolio of stocks to minimize risk while maximizing expected return?", "model": "llama2:7b", "domain": "Economy", "index": 2}
-{"prompt": "What is the optimal level of market competition for a business to achieve maximum profitability?", "model": "llama2:7b", "domain": "Economy", "index": 3}
-{"prompt": "What is the optimal level of competition among firms in a market for a monopoly to emerge?", "model": "llama2:7b", "domain": "Economy", "index": 4}
-{"prompt": "What is the optimal level of competition in a market for a company to achieve maximum profitability while minimizing costs?", "model": "llama2:7b", "domain": "Economy", "index": 5}

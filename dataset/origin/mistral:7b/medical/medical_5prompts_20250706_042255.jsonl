@@ -1,5 +1,0 @@
-{"prompt": "List the most common side effects associated with the administration of a specific type of antibiotic, such as Amoxicillin.", "model": "mistral:7b", "domain": "Medical", "index": 1}
-{"prompt": "Describe the primary differences between an MRI and a CT scan in terms of imaging principles, contrast usage, and patient preparation.", "model": "mistral:7b", "domain": "Medical", "index": 2}
-{"prompt": "Describe the primary functions of a cardiac pacemaker in patients with arrhythmia.", "model": "mistral:7b", "domain": "Medical", "index": 3}
-{"prompt": "What are the common side effects associated with long-term use of Metformin in Type 2 Diabetes patients?", "model": "mistral:7b", "domain": "Medical", "index": 4}
-{"prompt": "List and describe the primary functions of a cardiac monitor, including any unique features that differentiate it from other types of patient monitoring equipment.", "model": "mistral:7b", "domain": "Medical", "index": 5}
